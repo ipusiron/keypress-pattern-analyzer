@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KeyPress Pattern Analyzer</title>
+  <meta name="description" content="Interactive web app to explore keystroke dynamics and typing patterns, aimed at security education and research.">
+  
+  <!-- Security Headers (GitHub Pages compatible) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; media-src 'none'; frame-src 'none';">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+  
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <!-- Theme Toggle Button -->
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+    <span id="themeIcon">☀️</span>
+  </button>
+
+  <header class="site-header">
+    <h1>KeyPress Pattern Analyzer</h1>
+    <p class="subtitle">キーストロークの <strong>タイミング（dwell / flight）</strong> と<strong>パターン（digraph / エラー傾向など）</strong>を学習・研究用途で可視化するためのWebアプリです。</p>
+  </header>
+
+  <main class="container">
+    <!-- ====== モード・設定 ====== -->
+    <section class="card">
+      <div class="section-header">
+        <h2>Mode &amp; Settings</h2>
+        <span class="help-icon">
+          ?
+          <div class="tooltip">
+            入力モードとIME設定を調整できます。Fixed Phraseは定型文、Customは任意の文章、Free Textは自由入力です。
+          </div>
+        </span>
+      </div>
+
+      <div class="note-box" style="background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin-bottom: 15px;">
+        <strong>📝 入力モードについて</strong><br>
+        <span style="color: var(--muted); font-size: 14px;">
+          半角・全角どちらも対応していますが、キーストローク分析の精度向上のため<strong style="color: var(--accent);">半角英数字モードを推奨</strong>します。
+          日本語入力時はIME変換の影響で正確な計測が困難になります。
+        </span>
+      </div>
+
+      <div class="grid two">
+        <div>
+          <div class="form-help">
+            <label for="mode">Mode</label>
+            <span class="help-icon">
+              ?
+              <div class="tooltip">
+                Fixed: 標準テスト文で練習<br>
+                Custom: 独自の文章を設定<br>
+                Free: 自由に入力（制限なし）
+              </div>
+            </span>
+          </div>
+          <select id="mode">
+            <option value="fixed" selected>Fixed Phrase (半角推奨)</option>
+            <option value="custom">Custom Phrase (半角推奨)</option>
+            <option value="free">Free Text</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="imeToggle">
+            <input id="imeToggle" type="checkbox" checked>
+            Ignore IME composition（推奨）
+            <span class="help-icon">
+              ?
+              <div class="tooltip">
+                日本語入力時の変換処理を除外します。<br>半角英数字での測定時は有効にすることで、より正確な計測が可能です。
+              </div>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid one">
+        <div>
+          <div class="form-help">
+            <label for="phrase">Phrase (Fixed/Custom)</label>
+            <span class="help-icon">
+              ?
+              <div class="tooltip">
+                タイピングする目標文章です。<br>Fixed modeでは自動設定、Custom modeでは自由に編集できます。
+              </div>
+            </span>
+          </div>
+          <input id="phrase" type="text" placeholder="the quick brown fox jumps over the lazy dog">
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== 入力エリア ====== -->
+    <section class="card">
+      <div class="section-header">
+        <h2>Capture</h2>
+        <span class="help-icon">
+          ?
+          <div class="tooltip">
+            Startボタンで記録開始、入力後にStopで終了。<br>キーの押下・解放タイミングを高精度で記録します。
+          </div>
+        </span>
+      </div>
+      <div class="controls">
+        <button id="btnStart" class="primary" data-tooltip="記録を開始します">Start</button>
+        <button id="btnStop" disabled data-tooltip="記録を停止します">Stop</button>
+        <button id="btnClear" disabled data-tooltip="データをクリアします">Clear</button>
+      </div>
+
+      <label for="editor" class="sr-only">Input Area</label>
+      <textarea id="editor" class="editor" rows="6" placeholder="Click Start to begin recording" disabled></textarea>
+
+      <p class="muted small">
+        ※ Startボタンをクリックしてキーストローク記録を開始してください。
+      </p>
+    </section>
+
+    <!-- ====== 結果（プレースホルダー） ====== -->
+    <section class="card">
+      <div class="section-header">
+        <h2>Summary</h2>
+        <span class="help-icon">
+          ?
+          <div class="tooltip">
+            タイピングの統計情報です。<br>Keystrokesは打鍵数、Durationは総時間、Dwellはキー押下時間、DDは連続キー間隔を示します。
+          </div>
+        </span>
+      </div>
+      <div class="grid three">
+        <div class="stat"><div class="stat__label">Keystrokes</div><div class="stat__value">—</div></div>
+        <div class="stat"><div class="stat__label">Duration</div><div class="stat__value">—</div></div>
+        <div class="stat"><div class="stat__label">Avg Dwell / DD</div><div class="stat__value">—</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Visualizations</h2>
+        <span class="help-icon">
+          ?
+          <div class="tooltip">
+            タイピングパターンを3種類のグラフで可視化。<br>個人の特徴的なリズムやキー使用頻度を視覚的に確認できます。
+          </div>
+        </span>
+      </div>
+      <div class="viz-grid">
+        <div class="viz-container">
+          <div class="viz-header">
+            <h3>Timeline</h3>
+            <span class="viz-help" title="各キーの押下・解放タイミングを時系列で表示。青いバーがキー押下時間、横軸が時間経過を示します。">?</span>
+          </div>
+          <div class="viz-box" id="timeline">
+          </div>
+        </div>
+        <div class="viz-container">
+          <div class="viz-header">
+            <h3>Rhythm</h3>
+            <span class="viz-help" title="連続するキー入力の間隔変化を波形で表示。個人のタイピングリズムの特徴が現れます。">?</span>
+          </div>
+          <div class="viz-box" id="rhythm">
+          </div>
+        </div>
+        <div class="viz-container">
+          <div class="viz-header">
+            <h3>Keyboard Heatmap</h3>
+            <span class="viz-help" title="キーボード上の使用頻度を色の濃さで表示。よく使うキーほど濃い色になります。">?</span>
+          </div>
+          <div class="viz-box" id="heatmap">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>n-gram (Digraph)</h2>
+        <span class="help-icon">
+          ?
+          <div class="tooltip">
+            2文字の連続入力パターン（Digraph）の分析結果。<br>DD（Down-Down）とUD（Up-Down）の平均時間を表示。<br>個人特有のパターンが現れやすい指標です。
+          </div>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Digraph</th>
+              <th>DD mean</th>
+              <th>UD mean</th>
+              <th>Samples</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="4" class="muted center">No data</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ====== キーストローク分析結果 ====== -->
+    <section class="card" id="analysisSection" style="display: none;">
+      <div class="section-header">
+        <h2>Analysis Results</h2>
+        <span class="help-icon">
+          ?
+          <div class="tooltip">
+            タイピングパターンの詳細分析結果。<br>WPM、エラー率、タイピング安定性、個人的特徴などを表示します。
+          </div>
+        </span>
+      </div>
+      
+      <div class="analysis-grid">
+        <div class="analysis-card">
+          <h3>パフォーマンス</h3>
+          <div class="analysis-metrics">
+            <div class="metric">
+              <span class="metric-label">WPM (Words per Minute)</span>
+              <span class="metric-value" id="wpmValue">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">タイピング効率</span>
+              <span class="metric-value" id="efficiencyValue">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">安定性スコア</span>
+              <span class="metric-value" id="stabilityValue">—</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="analysis-card">
+          <h3>タイミング特性</h3>
+          <div class="analysis-metrics">
+            <div class="metric">
+              <span class="metric-label">平均Dwell Time</span>
+              <span class="metric-value" id="avgDwellValue">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">平均Flight Time</span>
+              <span class="metric-value" id="avgFlightValue">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">リズム一貫性</span>
+              <span class="metric-value" id="rhythmValue">—</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="analysis-card">
+          <h3>個人特徴</h3>
+          <div class="analysis-metrics">
+            <div class="metric">
+              <span class="metric-label">最頻出Digraph</span>
+              <span class="metric-value" id="topDigraphValue">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">タイピングスタイル</span>
+              <span class="metric-value" id="styleValue">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">特徴度</span>
+              <span class="metric-value" id="uniquenessValue">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="analysis-summary">
+        <h3>総合評価</h3>
+        <p id="analysisText">記録データを分析して、あなたのタイピングパターンの特徴を表示します。</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Profiles</h2>
+        <span class="help-icon">
+          ?
+          <div class="tooltip">
+            記録したタイピングパターンをプロファイルとして保存・管理。<br>複数のプロファイルを比較して個人差を分析できます。
+          </div>
+        </span>
+      </div>
+      <div class="controls">
+        <button id="btnSave" disabled data-tooltip="現在の記録をプロファイルとして保存">Save Profile</button>
+        <button id="btnExport" disabled data-tooltip="全プロファイルをJSONファイルで出力">Export JSON</button>
+        <button id="btnImport" disabled data-tooltip="JSONファイルからプロファイルを読み込み">Import JSON</button>
+        <button id="btnCompare" disabled data-tooltip="保存済みプロファイルの類似度を比較">Compare</button>
+      </div>
+      <p class="muted small">記録後にプロファイルを保存して、タイピングパターンを比較できます。</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer">
+      🔗 GitHubリポジトリはこちら（
+      <a href="https://github.com/ipusiron/keypress-pattern-analyzer" target="_blank" rel="noopener">
+        ipusiron/keypress-pattern-analyzer
+      </a>
+      ）
+  </footer>
+
+  <script src="./script.js" defer></script>
+</body>
+</html>
