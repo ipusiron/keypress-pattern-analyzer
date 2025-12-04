@@ -1,11 +1,39 @@
 <!--
 ---
-title: KeyPress Pattern Analyzer
-category: human-security
+id: day063
+slug: keypress-pattern-analyzer
+
+title: "KeyPress Pattern Analyzer"
+
+subtitle_ja: "キーストローク解析ツール"
+subtitle_en: "Keystroke Dynamics Analyzer"
+
+description_ja: "タイピングの癖（キー押下のタイミングパターン）を解析し、キーストローク生体認証の原理を体験できるWebアプリです。"
+description_en: "Interactive web app to explore keystroke dynamics and typing patterns, aimed at security education and research."
+
+category_ja:
+  - 人的セキュリティ
+  - 物理的セキュリティ
+  - 認証
+category_en:
+  - Human Security
+  - Physical Security
+  - Authentication
+
 difficulty: 2
-description: Interactive web app to explore keystroke dynamics and typing patterns, aimed at security education and research.
-tags: [keystroke, biometrics, typing, visualization, security-education]
-demo: https://ipusiron.github.io/keypress-pattern-analyzer/
+
+tags:
+  - keystroke
+  - biometrics
+  - typing
+  - visualization
+  - security-education
+  - behavioral-authentication
+
+repo_url: "https://github.com/ipusiron/keypress-pattern-analyzer"
+demo_url: "https://ipusiron.github.io/keypress-pattern-analyzer/"
+
+hub: true
 ---
 -->
 
