@@ -6,6 +6,24 @@
  */
 
 (function () {
+  const Core = window.KeystrokeCore;
+  let language = navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+  try {
+    const saved = localStorage.getItem('language');
+    if (saved === 'ja' || saved === 'en') language = saved;
+  } catch { /* Optional. */ }
+  const requestedLanguage = new URLSearchParams(location.search).get('lang');
+  if (requestedLanguage === 'ja' || requestedLanguage === 'en') language = requestedLanguage;
+  let statusKey = '';
+  const t = key => window.KeystrokeMessages[language][key];
+  let captureTimer = null;
+  let composing = false;
+  let importing = false;
+  function notify(message) {
+    statusKey = message;
+    document.getElementById('status').textContent = message ? t(message) : '';
+  }
+  const ms = value => Number.isFinite(value) ? value.toFixed(1) + ' ms' : '—';
   // DOM refs
   const els = {
     mode: document.getElementById('mode'),
@@ -39,6 +57,7 @@
     metrics: {},  // Calculated metrics
     profiles: [], // Saved profiles
     currentProfile: null,
+    context: null,
     keyStates: new Map(), // Track key press states
     digraphs: new Map(), // Track digraph timings
   };
@@ -204,231 +223,97 @@
 
   // Initialize
   function init() {
-    // Suppress browser extension errors that don't affect functionality
-    window.addEventListener('error', function(e) {
-      if (e.filename && e.filename.includes('content.js')) {
-        e.preventDefault();
-        console.info('Browser extension error suppressed (does not affect KeyPress Pattern Analyzer)');
-        return false;
-      }
-    });
-    
-    window.addEventListener('unhandledrejection', function(e) {
-      if (e.reason && e.reason.message && e.reason.message.includes('message port closed')) {
-        e.preventDefault();
-        console.info('Browser extension promise rejection suppressed (does not affect KeyPress Pattern Analyzer)');
-        return false;
-      }
-    });
-    
     loadProfiles();
     loadTheme();
     bindEvents();
     initTooltips();
     updateUI();
     els.phrase.value = DEFAULT_PHRASE;
+    applyLanguage();
     clearVisualizations(); // Show initial keyboard layout
+    window.addEventListener('resize', () => {
+      if (state.metrics.totalKeys) renderVisualizations();
+      else clearVisualizations();
+    });
+  }
+
+  function applyLanguage() {
+    document.documentElement.lang = language;
+    const set = (selector, key) => {
+      const el = document.querySelector(selector);
+      if (el) el.textContent = t(key);
+    };
+    for (const [selector, key] of Object.entries({
+      '.subtitle': 'subtitle', '.note-box': 'note', 'label[for=mode]': 'mode',
+      '#mode option[value=fixed]': 'fixed', '#mode option[value=custom]': 'custom',
+      '#mode option[value=free]': 'free', '#imeLabel': 'ime', 'label[for=phrase]': 'phrase',
+      '#btnStart': 'start', '#btnStop': 'stop', '#btnClear': 'clear', '#btnSave': 'save',
+      '#btnExport': 'export', '#btnImport': 'import', '#btnCompare': 'compare', '#btnDelete': 'delete',
+      'label[for=editor]': 'input', '#captureNote': 'captureNote', '#privacyNote': 'privacy',
+      '#helpTitle': 'help', '#helpClose': 'close', '.analysis-summary h3': 'reading'
+    })) set(selector, key);
+    for (const [selector, key] of [
+      ['main .section-header h2', 'headings'], ['.stat__label', 'stats'],
+      ['.analysis-card h3', 'cards'], ['.metric-label', 'labels'], ['.viz-header h3', 'viz'],
+      ['thead th', 'columns']
+    ]) document.querySelectorAll(selector).forEach((el, i) => { el.textContent = t(key)[i]; });
+    document.querySelectorAll('.help-button').forEach((button, i) => {
+      button.setAttribute('aria-label', t('help'));
+      button.dataset.helpText = t('helps')[i];
+    });
+    document.getElementById('helpDialog').close();
+    document.getElementById('helpText').textContent = '';
+    document.getElementById('themeToggle').setAttribute('aria-label', t('theme'));
+    document.getElementById('languageToggle').textContent = t('languageName');
+    document.getElementById('languageToggle').lang = language === 'ja' ? 'en' : 'ja';
+    notify(statusKey);
+    updateUI();
+    renderDigraphTable();
+    if (state.metrics.totalKeys) { performAnalysis(); renderVisualizations(); }
+    else { hideAnalysis(); clearVisualizations(); }
+    if (document.getElementById('comparison').textContent) compareProfiles();
   }
 
   function initTooltips() {
-    // Enhance button tooltips with better positioning
-    const buttons = document.querySelectorAll('button[data-tooltip]');
-    buttons.forEach(button => {
-      button.addEventListener('mouseenter', function() {
-        // Additional tooltip logic if needed
+    document.querySelectorAll('button[data-tooltip]').forEach(button => button.removeAttribute('data-tooltip'));
+    document.querySelectorAll('.help-icon, .viz-help').forEach((icon, i) => {
+      const text = icon.querySelector('.tooltip')?.textContent.trim() || icon.getAttribute('title') || '';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'help-button';
+      button.textContent = '?';
+      button.setAttribute('aria-label', t('help'));
+      button.dataset.help = String(i);
+      button.addEventListener('click', () => {
+        document.getElementById('helpText').textContent = button.dataset.helpText || text;
+        document.getElementById('helpDialog').showModal();
       });
+      icon.replaceWith(button);
     });
-
-    // Custom tooltips for visualization help icons
-    const vizHelpIcons = document.querySelectorAll('.viz-header .viz-help');
-    vizHelpIcons.forEach(icon => {
-      let activeTooltip = null;
-      
-      const showTooltip = (e) => {
-        // Remove any existing tooltip
-        if (activeTooltip) {
-          activeTooltip.remove();
-          activeTooltip = null;
-        }
-        
-        const tooltipText = icon.getAttribute('title');
-        if (!tooltipText) return;
-        
-        // Remove title attribute to prevent native tooltip
-        icon.setAttribute('data-original-title', tooltipText);
-        icon.removeAttribute('title');
-        
-        // Create tooltip element
-        activeTooltip = document.createElement('div');
-        activeTooltip.className = 'custom-viz-tooltip';
-        activeTooltip.innerHTML = tooltipText;
-        
-        // Apply high z-index and styling
-        Object.assign(activeTooltip.style, {
-          position: 'fixed',
-          background: 'var(--panel)',
-          color: 'var(--text)',
-          border: '1px solid var(--border)',
-          borderRadius: '6px',
-          padding: '8px 12px',
-          fontSize: '12px',
-          lineHeight: '1.4',
-          maxWidth: '300px',
-          wordWrap: 'break-word',
-          whiteSpace: 'normal',
-          zIndex: '2147483647', // Maximum safe z-index value
-          boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-          pointerEvents: 'none',
-          opacity: '0',
-          transform: 'translateY(-5px)',
-          transition: 'opacity 0.2s ease, transform 0.2s ease'
-        });
-        
-        document.body.appendChild(activeTooltip);
-        
-        // Position tooltip - ALWAYS above to avoid card overlapping
-        const iconRect = icon.getBoundingClientRect();
-        const tooltipRect = activeTooltip.getBoundingClientRect();
-        
-        // ALWAYS position above the icon to avoid stacking context issues
-        let left = iconRect.left + (iconRect.width / 2) - (tooltipRect.width / 2);
-        let top = iconRect.top - tooltipRect.height - 12; // Above with more space
-        
-        // Boundary adjustments for horizontal positioning
-        const margin = 10;
-        if (left < margin) left = margin;
-        if (left + tooltipRect.width > window.innerWidth - margin) {
-          left = window.innerWidth - tooltipRect.width - margin;
-        }
-        
-        // If tooltip goes above viewport, position at top of screen
-        if (top < margin) {
-          top = margin;
-        }
-        
-        activeTooltip.style.left = `${left}px`;
-        activeTooltip.style.top = `${top}px`;
-        
-        // Animate in
-        requestAnimationFrame(() => {
-          activeTooltip.style.opacity = '1';
-          activeTooltip.style.transform = 'translateY(0)';
-        });
-      };
-      
-      const hideTooltip = () => {
-        if (activeTooltip) {
-          activeTooltip.style.opacity = '0';
-          activeTooltip.style.transform = 'translateY(-5px)';
-          setTimeout(() => {
-            if (activeTooltip && activeTooltip.parentNode) {
-              activeTooltip.remove();
-            }
-            activeTooltip = null;
-          }, 200);
-        }
-        
-        // Restore title attribute for accessibility
-        const originalTitle = icon.getAttribute('data-original-title');
-        if (originalTitle) {
-          icon.setAttribute('title', originalTitle);
-        }
-      };
-      
-      // Event listeners
-      icon.addEventListener('mouseenter', showTooltip);
-      icon.addEventListener('mouseleave', hideTooltip);
-      icon.addEventListener('focus', showTooltip);
-      icon.addEventListener('blur', hideTooltip);
-      
-      // Mobile support
-      icon.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        showTooltip(e);
-        setTimeout(hideTooltip, 3000);
-      });
-      
-      // Click support
-      icon.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (activeTooltip) {
-          hideTooltip();
-        } else {
-          showTooltip(e);
-        }
-      });
-    });
-
-    // Mobile touch support for other help icons
-    const otherHelpIcons = document.querySelectorAll('.help-icon, .stat-help');
-    otherHelpIcons.forEach(icon => {
-      icon.addEventListener('touchstart', function(e) {
-        e.preventDefault();
-        this.classList.add('active');
-        setTimeout(() => {
-          this.classList.remove('active');
-        }, 3000);
-      });
-    });
+    document.getElementById('helpClose').addEventListener('click', () => document.getElementById('helpDialog').close());
   }
 
-
   function loadTheme() {
-    try {
-      const savedTheme = localStorage.getItem('theme') || 'dark';
-      // Validate theme value to prevent injection
-      if (savedTheme !== 'light' && savedTheme !== 'dark') {
-        console.warn('Invalid theme value, using default');
-        return;
-      }
-      
-      if (savedTheme === 'light') {
-        document.documentElement.classList.add('light-mode');
-        document.body.classList.add('light-mode');
-        document.getElementById('themeIcon').textContent = '🌙';
-      }
-    } catch (error) {
-      console.warn('Failed to load theme from localStorage:', error);
-      // Fallback to dark theme is default (no action needed)
-    }
+    document.body.classList.toggle('light-mode', document.documentElement.classList.contains('light-mode'));
+    document.getElementById('themeIcon').textContent =
+      document.documentElement.classList.contains('light-mode') ? '🌙' : '☀️';
   }
 
   function toggleTheme() {
-    const isLight = document.documentElement.classList.contains('light-mode');
-    const themeIcon = document.getElementById('themeIcon');
-    
-    if (isLight) {
-      document.documentElement.classList.remove('light-mode');
-      document.body.classList.remove('light-mode');
-      themeIcon.textContent = '☀️';
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.add('light-mode');
-      document.body.classList.add('light-mode');
-      themeIcon.textContent = '🌙';
-      localStorage.setItem('theme', 'light');
-    }
-    
-    // Re-render visualizations if they exist
-    if (state.metrics.totalKeys) {
-      renderVisualizations();
-    }
-  }
-
-  function getThemeColors() {
-    const isLight = document.documentElement.classList.contains('light-mode');
-    return {
-      primary: isLight ? '#0066cc' : '#4da3ff',
-      secondary: isLight ? '#28a745' : '#7bd389',
-      text: isLight ? '#1a1d23' : '#e6ecff',
-      muted: isLight ? '#6c757d' : '#9fb0d8',
-      border: isLight ? '#e1e5eb' : '#1f2640',
-      background: isLight ? '#f8f9fa' : '#0f1422',
-      panel: isLight ? '#ffffff' : '#141926'
-    };
+    const light = !document.documentElement.classList.contains('light-mode');
+    document.documentElement.classList.toggle('light-mode', light);
+    loadTheme();
+    try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch { /* Session-only setting. */ }
+    if (state.metrics.totalKeys) renderVisualizations();
+    else clearVisualizations();
   }
 
   function bindEvents() {
+    document.getElementById('languageToggle').addEventListener('click', () => {
+      language = language === 'ja' ? 'en' : 'ja';
+      try { localStorage.setItem('language', language); } catch { /* Session-only. */ }
+      applyLanguage();
+    });
     els.btnStart.addEventListener('click', startCapture);
     els.btnStop.addEventListener('click', stopCapture);
     els.btnClear.addEventListener('click', clearAll);
@@ -439,6 +324,20 @@
     
     els.editor.addEventListener('keydown', handleKeyDown);
     els.editor.addEventListener('keyup', handleKeyUp);
+    els.editor.addEventListener('blur', () => stopCapture('blur'));
+    window.addEventListener('blur', () => stopCapture('windowBlur'));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopCapture('hidden');
+    });
+    els.editor.addEventListener('compositionstart', () => { composing = true; compositionBoundary(); });
+    els.editor.addEventListener('compositionend', () => { composing = false; compositionBoundary(); });
+    els.editor.addEventListener('input', () => {
+      if (els.editor.value.length > Core.LIMITS.text) {
+        els.editor.value = els.editor.value.slice(0, Core.LIMITS.text);
+        stopCapture('textLimit');
+      }
+    });
+    document.getElementById('btnDelete').addEventListener('click', deleteProfiles);
     
     els.mode.addEventListener('change', updateMode);
     
@@ -469,647 +368,142 @@
   }
 
   function startCapture() {
-    if (state.running) return;
-    
+    if (state.running || importing) return;
+    clearAll();
     state.running = true;
     state.startedAt = performance.now();
-    state.events = [];
-    state.keyStates.clear();
-    state.digraphs.clear();
-    
-    els.editor.value = '';
-    els.editor.focus();
-    
+    state.context = { mode: els.mode.value, phrase: els.phrase.value,
+      ignoreIME: els.imeToggle.checked, imeUsed: false };
     updateUI();
+    els.editor.focus();
+    notify('recording');
+    captureTimer = setTimeout(() => stopCapture('timeLimit'), Core.LIMITS.time);
   }
 
-  function stopCapture() {
+  function stopCapture(message) {
     if (!state.running) return;
-    
     state.running = false;
-    
-    console.log('Debug: Events captured:', state.events.length);
-    console.log('Debug: Events:', state.events.slice(0, 5)); // Log first 5 events
-    
+    clearTimeout(captureTimer);
     calculateMetrics();
-    console.log('Debug: Metrics calculated:', state.metrics);
-    
+    state.keyStates.clear();
     updateUI();
-    
-    try {
-      renderVisualizations();
-      console.log('Debug: Visualizations rendered');
-    } catch (error) {
-      console.error('Error rendering visualizations:', error);
-    }
-    
-    try {
-      renderDigraphTable();
-      console.log('Debug: Digraph table rendered');
-    } catch (error) {
-      console.error('Error rendering digraph table:', error);
-    }
-    
-    try {
-      performAnalysis();
-      console.log('Debug: Analysis performed');
-    } catch (error) {
-      console.error('Error performing analysis:', error);
-    }
+    renderVisualizations();
+    renderDigraphTable();
+    performAnalysis();
+    notify(typeof message === 'string' ? message : 'stopped');
   }
 
   function clearAll() {
+    clearTimeout(captureTimer);
     state.running = false;
     state.events = [];
     state.metrics = {};
     state.keyStates.clear();
     state.digraphs.clear();
     els.editor.value = '';
-    
+    composing = false;
     updateUI();
     clearVisualizations();
     hideAnalysis();
+    notify('');
   }
 
   function performAnalysis() {
-    if (!state.metrics.totalKeys) return;
-    
-    const analysis = analyzeKeystrokePattern();
-    displayAnalysisResults(analysis);
+    if (!state.metrics.totalKeys) { hideAnalysis(); return; }
+    const m = state.metrics;
+    const values = {
+      wpmValue: Number.isFinite(m.wpm) ? m.wpm.toFixed(1) + ' WPM' : '—',
+      efficiencyValue: m.dwellTimes.length + ' / ' + m.totalKeys,
+      stabilityValue: ms(m.stdDD),
+      avgDwellValue: ms(m.avgDwell),
+      avgFlightValue: ms(m.avgFlight),
+      rhythmValue: ms(m.stdFlight),
+      topDigraphValue: m.ddTimes.length + ' / ' + m.flightTimes.length,
+      styleValue: String(m.incomplete),
+      uniquenessValue: String(m.interruptions)
+    };
+    for (const [id, value] of Object.entries(values)) document.getElementById(id).textContent = value;
+    document.getElementById('analysisText').textContent = t('interpretation');
     showAnalysis();
   }
 
-  function generateDetailedSummary(wpm, benchmarks, metrics, stability, uniqueness, digraphAnalysis, styleDetails) {
-    let summary = '';
-    
-    // タイピング速度分析
-    summary += `🎯 **タイピング速度分析**\n`;
-    summary += `あなたの速度: ${wpm}WPM\n`;
-    if (wpm >= benchmarks.wpm.expert) {
-      summary += `→ 上級者レベル（平均${benchmarks.wpm.average}WPMを大きく上回る高速タイピング）\n`;
-    } else if (wpm >= benchmarks.wpm.average) {
-      summary += `→ 平均以上（平均${benchmarks.wpm.average}WPMを上回る良好な速度）\n`;
-    } else if (wpm >= benchmarks.wpm.beginner) {
-      summary += `→ 標準レベル（平均${benchmarks.wpm.average}WPMに向けて向上の余地あり）\n`;
-    } else {
-      summary += `→ 初心者レベル（練習により${benchmarks.wpm.beginner}WPM以上を目指せます）\n`;
-    }
-    summary += '\n';
-    
-    // タイミング特性分析
-    summary += `⏱️ **タイミング特性分析**\n`;
-    summary += `Dwell Time（キー押下時間）: ${metrics.avgDwell.toFixed(0)}ms\n`;
-    if (metrics.avgDwell < benchmarks.dwellTime.fast) {
-      summary += `→ 平均${benchmarks.dwellTime.average}msより短く、軽快なタッチ\n`;
-    } else if (metrics.avgDwell > benchmarks.dwellTime.slow) {
-      summary += `→ 平均${benchmarks.dwellTime.average}msより長く、確実な押下\n`;
-    } else {
-      summary += `→ 平均的な${benchmarks.dwellTime.average}ms前後で標準的\n`;
-    }
-    
-    summary += `Flight Time（キー間移動時間）: ${metrics.avgFlight.toFixed(0)}ms\n`;
-    if (metrics.avgFlight < benchmarks.flightTime.fast) {
-      summary += `→ 平均${benchmarks.flightTime.average}msより短く、素早い指移動\n`;
-    } else if (metrics.avgFlight > benchmarks.flightTime.slow) {
-      summary += `→ 平均${benchmarks.flightTime.average}msより長く、慎重な選択\n`;
-    } else {
-      summary += `→ 平均的な${benchmarks.flightTime.average}ms前後で標準的\n`;
-    }
-    summary += '\n';
-    
-    // 安定性・一貫性分析
-    summary += `📊 **安定性・一貫性分析**\n`;
-    summary += `安定性スコア: ${stability.toFixed(0)}%\n`;
-    if (stability >= benchmarks.stability.veryStable) {
-      summary += `→ 非常に安定（平均${benchmarks.stability.stable}%を大きく上回る一貫性）\n`;
-    } else if (stability >= benchmarks.stability.stable) {
-      summary += `→ 安定（平均${benchmarks.stability.stable}%前後の良好な一貫性）\n`;
-    } else {
-      summary += `→ 不安定（平均${benchmarks.stability.stable}%を下回り、リズム改善の余地あり）\n`;
-    }
-    summary += `特徴: ${styleDetails.join('、')}\n\n`;
-    
-    // Digraphパターン分析
-    if (digraphAnalysis.fast.length > 0 || digraphAnalysis.slow.length > 0) {
-      summary += `🔤 **文字組み合わせパターン分析**\n`;
-      if (digraphAnalysis.fast.length > 0) {
-        summary += `高速処理パターン: ${digraphAnalysis.fast.slice(0, 5).join(', ')}\n`;
-        summary += `→ これらの組み合わせは得意で素早く入力できています\n`;
-      }
-      if (digraphAnalysis.slow.length > 0) {
-        summary += `時間要するパターン: ${digraphAnalysis.slow.slice(0, 5).join(', ')}\n`;
-        summary += `→ これらの組み合わせは練習により改善可能です\n`;
-      }
-      if (digraphAnalysis.consistent.length > 0) {
-        summary += `安定パターン: ${digraphAnalysis.consistent.slice(0, 3).join(', ')}\n`;
-      }
-      summary += '\n';
-    }
-    
-    // 個人特性サマリー
-    summary += `🎭 **個人特性サマリー**\n`;
-    summary += `パターン多様性: ${uniqueness}%\n`;
-    if (uniqueness >= 70) {
-      summary += `→ 多様なキー組み合わせを使用し、豊富な表現力を持つタイピング\n`;
-    } else if (uniqueness >= 50) {
-      summary += `→ 標準的なキーパターンで、バランスの取れたタイピング\n`;
-    } else {
-      summary += `→ 特定のパターンに集中する効率重視のタイピング\n`;
-    }
-    
-    // セキュリティ的総合評価
-    summary += '\n🔒 **セキュリティ的総合評価**\n';
-    
-    // 個人識別性の評価
-    let identifiabilityScore = 0;
-    let spoofingResistance = '';
-    let recommendedSecurity = '';
-    
-    // 安定性による識別性（高すぎても低すぎても問題）
-    if (stability >= 70 && stability <= 85) {
-      identifiabilityScore += 3; // 理想的な安定性
-      summary += `✓ 安定性が理想的範囲（${stability.toFixed(0)}%）- 個人識別に適している\n`;
-    } else if (stability > 85) {
-      identifiabilityScore += 1;
-      summary += `△ 安定性が高すぎ（${stability.toFixed(0)}%）- パターンが単調で模倣されやすい\n`;
-    } else if (stability < 50) {
-      identifiabilityScore += 1;
-      summary += `△ 安定性が低い（${stability.toFixed(0)}%）- 本人認証時に誤判定の可能性\n`;
-    } else {
-      identifiabilityScore += 2;
-      summary += `○ 安定性が適度（${stability.toFixed(0)}%）- 識別可能だが改善の余地あり\n`;
-    }
-    
-    // パターンの多様性による耐性
-    if (uniqueness >= 60) {
-      identifiabilityScore += 3;
-      summary += `✓ パターン多様性が高い（${uniqueness}%）- なりすまし困難\n`;
-    } else if (uniqueness >= 40) {
-      identifiabilityScore += 2;
-      summary += `○ パターン多様性が中程度（${uniqueness}%）- 一定の耐性あり\n`;
-    } else {
-      identifiabilityScore += 1;
-      summary += `△ パターンが単調（${uniqueness}%）- 観察により模倣される可能性\n`;
-    }
-    
-    // タイミングの独自性
-    const dwellUniqueness = Math.abs(metrics.avgDwell - benchmarks.dwellTime.average) / benchmarks.dwellTime.average;
-    const flightUniqueness = Math.abs(metrics.avgFlight - benchmarks.flightTime.average) / benchmarks.flightTime.average;
-    
-    if (dwellUniqueness > 0.3 || flightUniqueness > 0.3) {
-      identifiabilityScore += 2;
-      summary += `✓ 独特なタイミング特性 - 個人特有のパターンが顕著\n`;
-    } else if (dwellUniqueness > 0.15 || flightUniqueness > 0.15) {
-      identifiabilityScore += 1;
-      summary += `○ やや特徴的なタイミング - 識別には十分\n`;
-    } else {
-      summary += `△ 平均的なタイミング - 追加認証要素推奨\n`;
-    }
-    
-    // 総合セキュリティレベル判定
-    summary += '\n**🛡️ 生体認証適合性評価**\n';
-    if (identifiabilityScore >= 7) {
-      spoofingResistance = '高耐性';
-      recommendedSecurity = '単体認証可能';
-      summary += `🔒 高セキュリティレベル（${identifiabilityScore}/8点）\n`;
-      summary += `→ キーストローク認証単体での使用が可能\n`;
-      summary += `→ 攻撃者による模倣は非常に困難\n`;
-      summary += `→ 継続認証システムに最適\n`;
-    } else if (identifiabilityScore >= 5) {
-      spoofingResistance = '中耐性';
-      recommendedSecurity = '多要素認証推奨';
-      summary += `⚡ 中セキュリティレベル（${identifiabilityScore}/8点）\n`;
-      summary += `→ 他の認証要素との組み合わせ推奨\n`;
-      summary += `→ 訓練された攻撃者には注意が必要\n`;
-      summary += `→ パスワードとの併用で効果的\n`;
-    } else {
-      spoofingResistance = '低耐性';
-      recommendedSecurity = '補助的認証のみ';
-      summary += `⚠️ 低セキュリティレベル（${identifiabilityScore}/8点）\n`;
-      summary += `→ 主要認証手段としては不適切\n`;
-      summary += `→ 行動分析や異常検知での補助利用\n`;
-      summary += `→ パターン改善により向上可能\n`;
-    }
-    
-    // 音響解析との連携評価
-    summary += '\n**🎤 音響解析連携評価**\n';
-    if (digraphAnalysis.fast.length > 2 && digraphAnalysis.slow.length > 2) {
-      summary += `✓ 音量パターンとの相関分析に適している\n`;
-      summary += `→ Mic Gain Loggerとの併用で識別精度向上\n`;
-      summary += `→ 複合的サイドチャネル攻撃の検証に有効\n`;
-    } else {
-      summary += `○ 基本的な音響パターン分析が可能\n`;
-      summary += `→ より多様な入力での再分析を推奨\n`;
-    }
-    
-    // 推奨セキュリティ対策
-    summary += '\n**📋 推奨セキュリティ対策**\n';
-    if (identifiabilityScore >= 7) {
-      summary += `• キーストローク認証システムの主要要素として活用\n`;
-      summary += `• リアルタイム継続認証の実装\n`;
-      summary += `• 異常検知システムでの高精度判定\n`;
-    } else if (identifiabilityScore >= 5) {
-      summary += `• 従来認証との多要素組み合わせ\n`;
-      summary += `• 定期的なパターン更新による精度向上\n`;
-      summary += `• 環境要因を考慮した閾値調整\n`;
-    } else {
-      summary += `• より安定したパターン確立のための練習\n`;
-      summary += `• 他の生体認証手段との併用検討\n`;
-      summary += `• 行動ログ分析での補助利用\n`;
-    }
-    
-    return summary;
-  }
-
-  function analyzeKeystrokePattern() {
-    const metrics = state.metrics;
-    const events = state.events;
-    const text = els.editor.value;
-    
-    // 平均的な値（研究データに基づく目安）
-    const benchmarks = {
-      wpm: { beginner: 20, average: 35, expert: 60 },
-      dwellTime: { fast: 80, average: 120, slow: 180 },
-      flightTime: { fast: 120, average: 180, slow: 250 },
-      stability: { unstable: 50, stable: 70, veryStable: 85 }
-    };
-    
-    // Calculate WPM (already in metrics)
-    const wpm = metrics.wpm;
-    
-    // Calculate typing efficiency (actual characters vs expected)
-    const actualChars = text.length;
-    const expectedChars = els.phrase.value.length || actualChars;
-    const efficiency = expectedChars > 0 ? Math.round((actualChars / expectedChars) * 100) : 100;
-    
-    // Calculate stability (coefficient of variation for intervals)
-    const cv = metrics.stdDD > 0 ? (metrics.stdDD / metrics.avgDD) * 100 : 0;
-    const stability = Math.max(0, 100 - cv);
-    
-    // Calculate rhythm consistency (based on flight time variance)
-    const rhythmConsistency = metrics.stdFlight > 0 ? 
-      Math.max(0, 100 - (metrics.stdFlight / metrics.avgFlight) * 100) : 100;
-    
-    // 詳細なDigraph分析
-    let digraphAnalysis = { fast: [], slow: [], consistent: [], variable: [] };
-    let topDigraph = '—';
-    let maxCount = 0;
-    
-    if (state.digraphs.size > 0) {
-      for (const [digraph, data] of state.digraphs) {
-        if (data.DD.length > maxCount) {
-          maxCount = data.DD.length;
-          topDigraph = digraph;
-        }
-        
-        if (data.DD.length >= 2) {
-          const avgTime = data.DD.reduce((a, b) => a + b, 0) / data.DD.length;
-          const std = standardDeviation(data.DD);
-          const cv = (std / avgTime) * 100;
-          
-          if (avgTime < 200) digraphAnalysis.fast.push(digraph);
-          if (avgTime > 400) digraphAnalysis.slow.push(digraph);
-          if (cv < 20) digraphAnalysis.consistent.push(digraph);
-          if (cv > 40) digraphAnalysis.variable.push(digraph);
-        }
-      }
-    }
-    
-    // より詳細なタイピングスタイル分析
-    let typingStyle = '';
-    let styleDetails = [];
-    
-    // Dwell time 分析
-    if (metrics.avgDwell < benchmarks.dwellTime.fast) {
-      typingStyle = '軽快型';
-      styleDetails.push('キーを軽くタッチする傾向');
-    } else if (metrics.avgDwell > benchmarks.dwellTime.slow) {
-      typingStyle = '重厚型';
-      styleDetails.push('キーをしっかり押し込む傾向');
-    } else {
-      typingStyle = 'バランス型';
-      styleDetails.push('標準的なキー押下強度');
-    }
-    
-    // Flight time 分析
-    if (metrics.avgFlight < benchmarks.flightTime.fast) {
-      styleDetails.push('指の移動が素早い');
-    } else if (metrics.avgFlight > benchmarks.flightTime.slow) {
-      styleDetails.push('慎重に次のキーを選択');
-    }
-    
-    // 安定性分析
-    if (cv > 30) {
-      typingStyle += ' (不安定)';
-      styleDetails.push('リズムのばらつきが大きい');
-    } else if (cv < 15) {
-      typingStyle += ' (高安定)';
-      styleDetails.push('非常に一定したリズム');
-    }
-    
-    // Calculate uniqueness score based on pattern variety
-    const uniqueDigraphs = state.digraphs.size;
-    const totalDigraphs = Math.max(1, metrics.totalKeys - 1);
-    const uniqueness = Math.round((uniqueDigraphs / totalDigraphs) * 100);
-    
-    // 平均との比較分析を含むより詳細なサマリー生成
-    let summaryText = generateDetailedSummary(wpm, benchmarks, metrics, stability, uniqueness, digraphAnalysis, styleDetails);
-    
-    return {
-      wpm: wpm,
-      efficiency: efficiency,
-      stability: stability.toFixed(1),
-      avgDwell: metrics.avgDwell.toFixed(1),
-      avgFlight: metrics.avgFlight.toFixed(1),
-      rhythmConsistency: rhythmConsistency.toFixed(1),
-      topDigraph: topDigraph + (maxCount > 1 ? ` (×${maxCount})` : ''),
-      typingStyle: typingStyle,
-      uniqueness: uniqueness,
-      summaryText: summaryText
-    };
-  }
-
-  function formatAnalysisText(text) {
-    // HTML escape function to prevent XSS
-    function escapeHtml(unsafe) {
-      return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    }
-    
-    // First escape the text, then apply safe formatting
-    const escaped = escapeHtml(text);
-    return escaped
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // **bold** -> <strong>
-      .replace(/\n/g, '<br>') // 改行を<br>に変換
-      .replace(/→/g, '&nbsp;&nbsp;→') // 矢印の前にスペースを追加
-      .replace(/(🎯|⏱️|📊|🔤|🎭|🏆|🔒|⚡|⚠️|✓|○|△|🛡️|🎤|📋)/g, '<span style="font-size: 1.1em;">$1</span>'); // 絵文字を少し大きく
-  }
-
-  function displayAnalysisResults(analysis) {
-    // Performance metrics
-    document.getElementById('wpmValue').textContent = analysis.wpm + ' WPM';
-    document.getElementById('efficiencyValue').textContent = analysis.efficiency + '%';
-    document.getElementById('stabilityValue').textContent = analysis.stability + '%';
-    
-    // Timing characteristics
-    document.getElementById('avgDwellValue').textContent = analysis.avgDwell + 'ms';
-    document.getElementById('avgFlightValue').textContent = analysis.avgFlight + 'ms';
-    document.getElementById('rhythmValue').textContent = analysis.rhythmConsistency + '%';
-    
-    // Personal characteristics
-    document.getElementById('topDigraphValue').textContent = analysis.topDigraph;
-    document.getElementById('styleValue').textContent = analysis.typingStyle;
-    document.getElementById('uniquenessValue').textContent = analysis.uniqueness + '%';
-    
-    // Summary text with proper formatting
-    const analysisElement = document.getElementById('analysisText');
-    analysisElement.innerHTML = formatAnalysisText(analysis.summaryText);
-    
-    // Add color coding
-    updateValueColors('wpmValue', analysis.wpm, [20, 40]);
-    updateValueColors('efficiencyValue', analysis.efficiency, [80, 95]);
-    updateValueColors('stabilityValue', parseFloat(analysis.stability), [60, 80]);
-    updateValueColors('rhythmValue', parseFloat(analysis.rhythmConsistency), [60, 80]);
-    updateValueColors('uniquenessValue', analysis.uniqueness, [50, 70]);
-  }
-
-  function updateValueColors(elementId, value, thresholds) {
-    const element = document.getElementById(elementId);
-    element.classList.remove('highlight', 'good', 'warning');
-    
-    if (value >= thresholds[1]) {
-      element.classList.add('good');
-    } else if (value >= thresholds[0]) {
-      element.classList.add('highlight');
-    } else {
-      element.classList.add('warning');
-    }
-  }
-
   function showAnalysis() {
-    document.getElementById('analysisSection').style.display = 'block';
+    document.getElementById('analysisSection').hidden = false;
   }
 
   function hideAnalysis() {
-    document.getElementById('analysisSection').style.display = 'none';
+    document.getElementById('analysisSection').hidden = true;
+    document.querySelectorAll('#analysisSection .metric-value').forEach(el => { el.textContent = '—'; });
+    document.getElementById('analysisText').textContent = '';
+  }
+
+  function recordEvent(event) {
+    if (!state.running) return false;
+    const elapsed = performance.now() - state.startedAt;
+    if (elapsed > Core.LIMITS.time || state.events.length >= Core.LIMITS.events) {
+      stopCapture('eventLimit');
+      return false;
+    }
+    state.events.push({ ...event, t: Math.max(0, elapsed) });
+    if (state.events.length === Core.LIMITS.events) stopCapture('eventLimit');
+    return true;
+  }
+
+  function compositionBoundary() {
+    if (!state.running) return;
+    state.context.imeUsed = true;
+    state.keyStates.clear();
+    recordEvent({ type: 'break' });
   }
 
   function handleKeyDown(e) {
-    if (!state.running) return;
-    
-    // Skip if IME composition and toggle is checked
-    if (els.imeToggle.checked && e.isComposing) return;
-    
-    // Skip if key is already pressed (key repeat)
-    if (state.keyStates.has(e.code)) return;
-    
-    // Validate and sanitize key information
-    const sanitizedCode = e.code ? e.code.slice(0, 50) : 'Unknown'; // Limit length
-    const sanitizedKey = e.key ? e.key.slice(0, 10) : 'Unknown'; // Limit length
-    
-    const t = performance.now() - state.startedAt;
-    const event = {
-      type: 'down',
-      code: sanitizedCode,
-      key: sanitizedKey,
-      t: t
-    };
-    
-    // Limit total events to prevent memory exhaustion
-    if (state.events.length < 10000) {
-      state.events.push(event);
-      state.keyStates.set(sanitizedCode, { downTime: t, key: sanitizedKey });
+    if (!state.running || e.repeat) return;
+    if (els.imeToggle.checked && (e.isComposing || composing || e.keyCode === 229)) {
+      compositionBoundary();
+      return;
     }
-    
-    // Track digraph timing (DD - down to down)
-    if (state.events.length >= 2) {
-      const prevDown = findLastDownEvent(state.events.length - 2);
-      if (prevDown) {
-        const digraph = prevDown.key + e.key;
-        if (!state.digraphs.has(digraph)) {
-          state.digraphs.set(digraph, { DD: [], UD: [], DU: [], UU: [] });
-        }
-        state.digraphs.get(digraph).DD.push(t - prevDown.t);
-      }
-    }
+    const code = (e.code || 'Unknown').slice(0, 50);
+    if (state.keyStates.has(code)) return;
+    const key = (e.key || 'Unknown').slice(0, 50);
+    if (recordEvent({ type: 'down', code, key }) && state.running) state.keyStates.set(code, key);
   }
 
   function handleKeyUp(e) {
-    if (!state.running) return;
-    
-    // Skip if IME composition and toggle is checked
-    if (els.imeToggle.checked && e.isComposing) return;
-    
-    const keyState = state.keyStates.get(e.code);
-    if (!keyState) return;
-    
-    const t = performance.now() - state.startedAt;
-    const event = {
-      type: 'up',
-      code: e.code,
-      key: e.key,
-      t: t,
-      dwell: t - keyState.downTime // Dwell time
-    };
-    
-    state.events.push(event);
-    state.keyStates.delete(e.code);
-    
-    // Track digraph timing (UD - up to down)
-    const nextDownIdx = findNextDownEvent(state.events.length - 1);
-    if (nextDownIdx !== -1) {
-      const nextDown = state.events[nextDownIdx];
-      const digraph = e.key + nextDown.key;
-      if (!state.digraphs.has(digraph)) {
-        state.digraphs.set(digraph, { DD: [], UD: [], DU: [], UU: [] });
-      }
-      state.digraphs.get(digraph).UD.push(nextDown.t - t);
-    }
-  }
-
-  function findLastDownEvent(fromIndex) {
-    for (let i = fromIndex; i >= 0; i--) {
-      if (state.events[i].type === 'down') {
-        return state.events[i];
-      }
-    }
-    return null;
-  }
-
-  function findNextDownEvent(fromIndex) {
-    for (let i = fromIndex + 1; i < state.events.length; i++) {
-      if (state.events[i].type === 'down') {
-        return i;
-      }
-    }
-    return -1;
+    if (!state.running || (els.imeToggle.checked && (e.isComposing || composing || e.keyCode === 229))) return;
+    const code = (e.code || 'Unknown').slice(0, 50);
+    if (!state.keyStates.has(code)) return;
+    const key = state.keyStates.get(code);
+    state.keyStates.delete(code);
+    recordEvent({ type: 'up', code, key });
   }
 
   function calculateMetrics() {
-    const events = state.events;
-    if (events.length === 0) return;
-    
-    const downEvents = events.filter(e => e.type === 'down');
-    const upEvents = events.filter(e => e.type === 'up');
-    
-    // Calculate dwell times
-    const dwellTimes = upEvents.map(e => e.dwell).filter(d => d !== undefined);
-    
-    // Calculate flight times (time between key up and next key down)
-    const flightTimes = [];
-    for (let i = 0; i < events.length - 1; i++) {
-      if (events[i].type === 'up') {
-        for (let j = i + 1; j < events.length; j++) {
-          if (events[j].type === 'down') {
-            flightTimes.push(events[j].t - events[i].t);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Calculate DD times (down to down)
-    const ddTimes = [];
-    for (let i = 0; i < downEvents.length - 1; i++) {
-      ddTimes.push(downEvents[i + 1].t - downEvents[i].t);
-    }
-    
-    state.metrics = {
-      totalKeys: downEvents.length,
-      duration: events[events.length - 1].t,
-      avgDwell: average(dwellTimes),
-      stdDwell: standardDeviation(dwellTimes),
-      avgFlight: average(flightTimes),
-      stdFlight: standardDeviation(flightTimes),
-      avgDD: average(ddTimes),
-      stdDD: standardDeviation(ddTimes),
-      wpm: calculateWPM(els.editor.value, events[events.length - 1].t),
-      dwellTimes,
-      flightTimes,
-      ddTimes
-    };
+    state.metrics = Core.analyze(state.events, els.editor.value);
+    state.digraphs = state.metrics.digraphs;
   }
 
-  function average(arr) {
-    if (arr.length === 0) return 0;
-    return arr.reduce((a, b) => a + b, 0) / arr.length;
-  }
-
-  function standardDeviation(arr) {
-    if (arr.length === 0) return 0;
-    const avg = average(arr);
-    const squareDiffs = arr.map(value => Math.pow(value - avg, 2));
-    return Math.sqrt(average(squareDiffs));
-  }
-
-  function calculateWPM(text, durationMs) {
-    const words = text.trim().split(/\s+/).length;
-    const minutes = durationMs / 60000;
-    return minutes > 0 ? Math.round(words / minutes) : 0;
-  }
+  const average = values => Core.mean(values);
 
   function updateUI() {
-    // Enable/disable buttons
-    els.btnStart.disabled = state.running;
+    els.btnStart.disabled = state.running || importing;
     els.btnStop.disabled = !state.running;
     els.btnClear.disabled = state.running;
     els.editor.disabled = !state.running;
     els.mode.disabled = state.running;
     els.imeToggle.disabled = state.running;
     els.phrase.disabled = state.running || els.mode.value !== 'custom';
-    
-    els.btnSave.disabled = !state.metrics.totalKeys;
+    els.btnSave.disabled = state.running || importing || !state.metrics.totalKeys;
     els.btnExport.disabled = state.profiles.length === 0;
-    els.btnImport.disabled = state.running;
-    els.btnCompare.disabled = state.profiles.length < 2;
-    
-    // Update summary stats
-    const statsContainer = document.querySelector('.grid.three');
-    if (state.metrics.totalKeys) {
-      statsContainer.innerHTML = `
-        <div class="stat">
-          <span class="stat-help" title="総キー押下回数（スペースキー含む）">?</span>
-          <div class="stat__label">Keystrokes</div>
-          <div class="stat__value">${state.metrics.totalKeys}</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="タイピング開始から終了までの総時間">?</span>
-          <div class="stat__label">Duration</div>
-          <div class="stat__value">${(state.metrics.duration / 1000).toFixed(2)}s</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="Dwell: キー押下時間の平均 / DD: 連続キー間隔の平均">?</span>
-          <div class="stat__label">Avg Dwell / DD</div>
-          <div class="stat__value">${state.metrics.avgDwell.toFixed(0)}ms / ${state.metrics.avgDD.toFixed(0)}ms</div>
-        </div>
-      `;
-    } else {
-      statsContainer.innerHTML = `
-        <div class="stat">
-          <span class="stat-help" title="総キー押下回数（スペースキー含む）">?</span>
-          <div class="stat__label">Keystrokes</div>
-          <div class="stat__value">—</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="タイピング開始から終了までの総時間">?</span>
-          <div class="stat__label">Duration</div>
-          <div class="stat__value">—</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="Dwell: キー押下時間の平均 / DD: 連続キー間隔の平均">?</span>
-          <div class="stat__label">Avg Dwell / DD</div>
-          <div class="stat__value">—</div>
-        </div>
-      `;
-    }
-    
-    // Update button texts
-    els.btnStart.textContent = state.running ? 'Recording...' : 'Start';
-    els.editor.placeholder = state.running ? 'Type here... (半角英数字推奨 / Half-width characters recommended)' : 'Click Start to begin recording';
+    els.btnImport.disabled = state.running || importing;
+    els.btnCompare.disabled = state.running || state.profiles.length < 2;
+    document.getElementById('btnDelete').disabled = state.running || importing;
+    const values = document.querySelectorAll('.grid.three .stat__value');
+    const m = state.metrics;
+    values[0].textContent = m.totalKeys || '—';
+    values[1].textContent = m.totalKeys ? (m.duration / 1000).toFixed(2) + ' s' : '—';
+    values[2].textContent = m.totalKeys ? ms(m.avgDwell) + ' / ' + ms(m.avgDD) : '—';
+    document.getElementById('profileCount').textContent = state.profiles.length + ' / 50';
+    els.editor.placeholder = state.running ? t('typePlaceholder') : t('beginPlaceholder');
   }
 
   function renderVisualizations() {
@@ -1131,9 +525,7 @@
       const colors = getThemeColors();
       const vizConfig = getVizConfig();
       
-      console.log('Debug Timeline: events length:', events.length);
       if (events.length === 0) {
-        console.log('Debug Timeline: No events to render');
         return;
       }
     
@@ -1146,18 +538,16 @@
     
     ctx.clearRect(0, 0, width, height);
     
-    const maxTime = events[events.length - 1].t;
+    const maxTime = Math.max(1, events[events.length - 1].t);
     const scale = (width - 2 * padding) / maxTime;
     
     // Track text positions to avoid overlaps
     const textPositions = [];
     
     // Draw key press bars with improved colors and visibility
-    state.events.forEach(event => {
+    (state.metrics.strokes || []).forEach(event => {
       if (event.type === 'down') {
-        const upEvent = state.events.find(e => 
-          e.type === 'up' && e.code === event.code && e.t > event.t
-        );
+        const upEvent = event.up === null ? null : { t: event.up };
         
         if (upEvent) {
           const x = padding + event.t * scale;
@@ -1181,7 +571,7 @@
           // Enhanced multi-layer text positioning with adaptive sizing
           if (w >= 6) { // Show label for even smaller bars
             const text = event.key.toUpperCase();
-            const dwellTime = event.dwellTime || 0;
+            const dwellTime = upEvent.t - event.t;
             
             // Calculate adaptive font size based on density and importance
             const density = Math.min(events.length / 50, 1); // 0-1 density factor
@@ -1357,9 +747,7 @@
       const vizConfig = getVizConfig();
       const isLight = document.documentElement.classList.contains('light-mode');
       
-      console.log('Debug Rhythm: down events length:', events.length);
       if (events.length < 2) {
-        console.log('Debug Rhythm: Not enough events to render');
         return;
       }
     
@@ -1371,16 +759,14 @@
     ctx.clearRect(0, 0, width, height);
     
     // Calculate intervals
-    const intervals = [];
-    for (let i = 0; i < events.length - 1; i++) {
-      intervals.push(events[i + 1].t - events[i].t);
-    }
+    const intervals = state.metrics.ddTimes || [];
+    if (!intervals.length) return;
     
     const maxInterval = Math.max(...intervals);
     const minInterval = Math.min(...intervals);
     const avgInterval = average(intervals);
     const xScale = (width - 2 * padding) / intervals.length;
-    const yScale = (height - 2 * padding - 20) / maxInterval;
+    const yScale = (height - 2 * padding - 20) / Math.max(1, maxInterval);
     
     // Draw background grid for better readability
     ctx.strokeStyle = colors.border || '#1f2640';
@@ -1466,7 +852,7 @@
     ctx.fillText(`Avg: ${avgInterval.toFixed(0)}ms`, width - padding - 5, avgY - 5);
     
     // Add Y-axis labels
-    ctx.fillStyle = colors.muted;
+    ctx.fillStyle = colors.textMuted;
     ctx.font = '9px monospace';
     ctx.textAlign = 'right';
     ctx.fillText(`${maxInterval.toFixed(0)}ms`, padding - 5, padding + 5);
@@ -1497,7 +883,8 @@
         keyFreq.set(event.key, count + 1);
       });
       
-      console.log('Debug Heatmap: key frequencies:', keyFreq.size);
+      document.getElementById('keyCounts').textContent = [...keyFreq].map(([key, count]) =>
+        JSON.stringify(key) + ': ' + count).join(' / ');
       
       // Always render keyboard layout, even with no data
       const hasData = keyFreq.size > 0;
@@ -1567,11 +954,11 @@
       ctx.fillStyle = colors.text;
       ctx.font = '11px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText('1回', legendX, legendY + legendBarHeight + 15);
+      ctx.fillText('1' + t('count'), legendX, legendY + legendBarHeight + 15);
       ctx.textAlign = 'right';
-      ctx.fillText(`${maxFreq}回`, legendX + legendWidth, legendY + legendBarHeight + 15);
+      ctx.fillText(maxFreq + t('count'), legendX + legendWidth, legendY + legendBarHeight + 15);
       ctx.textAlign = 'center';
-      ctx.fillText('使用頻度', legendX + legendWidth / 2, legendY + legendBarHeight + 15);
+      ctx.fillText(t('frequency'), legendX + legendWidth / 2, legendY + legendBarHeight + 15);
       
       legendHeight = 50; // Space for legend
     }
@@ -1661,7 +1048,7 @@
     // Draw extra keys that are not in the standard layout
     if (extraKeys.length > 0) {
       const extraY = startY + rows.length * (keySize + keyGap) + 5;
-      extraKeys.forEach((key, index) => {
+      extraKeys.slice(0, 14).forEach((key, index) => {
         const extraX = startX + index * (keySize + keyGap);
         const freq = keyFreq.get(key) || 0;
         const intensity = freq / maxFreq;
@@ -1707,46 +1094,25 @@
   }
 
   function createCanvas(container) {
-    // Check if canvas already exists to avoid recreating
-    const existingCanvas = container.querySelector('canvas');
-    if (existingCanvas) {
-      return existingCanvas; // Return existing canvas
-    }
-    
-    // Clear container (no need to preserve titles/icons - they're now outside)
-    container.innerHTML = '';
-    
-    // No need to recreate help icons or titles - they're now in the viz-header outside the viz-box
-    
-    const canvas = document.createElement('canvas');
-    // Ensure minimum width for proper visualization, allow horizontal scroll if needed
-    const minWidth = container.id === 'heatmap' ? 400 : 300;
-    canvas.width = Math.max(minWidth, container.offsetWidth - 28); // Account for padding
-    canvas.style.marginTop = '10px';
-    canvas.style.maxWidth = 'none'; // Allow canvas to exceed container width
-    
-    // Different heights for different visualization types
-    if (container.id === 'heatmap') {
-      canvas.height = 280; // Much taller for keyboard layout + legend + extra keys
-    } else if (container.id === 'timeline') {
-      canvas.height = 120; // Shorter for timeline
-    } else {
-      canvas.height = 160; // Default for rhythm
-    }
-    
+    const canvas = container.querySelector('canvas') || document.createElement('canvas');
+    const minWidth = container.id === 'heatmap' ? 640 : 400;
+    canvas.width = Math.max(minWidth, container.clientWidth - 28);
+    canvas.height = container.id === 'heatmap' ? 380 : 200;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', t('viz')[['timeline', 'rhythm', 'heatmap'].indexOf(container.id)]);
     container.appendChild(canvas);
     return canvas;
   }
 
   function clearVisualizations() {
     // Clear visualization boxes (headers and help icons are now outside in HTML)
-    els.viz.timeline.innerHTML = '';
-    els.viz.rhythm.innerHTML = '';
-    els.viz.heatmap.innerHTML = '';
+    els.viz.timeline.replaceChildren();
+    els.viz.rhythm.replaceChildren();
+    els.viz.heatmap.replaceChildren();
     
     // Clear digraph table
     const tbody = document.querySelector('table tbody');
-    tbody.innerHTML = '<tr><td colspan="4" class="muted center">No data</td></tr>';
+    renderDigraphTable();
     
     // Show empty keyboard layout
     renderHeatmap();
@@ -1754,175 +1120,128 @@
 
   function renderDigraphTable() {
     const tbody = document.querySelector('table tbody');
-    tbody.innerHTML = '';
-    
-    if (state.digraphs.size === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="muted center">No digraph data</td></tr>';
-      return;
+    tbody.replaceChildren();
+    const rows = [...state.digraphs.values()].sort((a, b) => b.DD.length - a.DD.length).slice(0, 10);
+    if (!rows.length) {
+      const cell = tbody.insertRow().insertCell();
+      cell.colSpan = 4;
+      cell.textContent = t('noData');
     }
-    
-    // Sort digraphs by frequency
-    const sortedDigraphs = Array.from(state.digraphs.entries())
-      .map(([digraph, timings]) => ({
-        digraph,
-        ddMean: average(timings.DD),
-        udMean: average(timings.UD),
-        samples: timings.DD.length
-      }))
-      .filter(d => d.samples > 0)
-      .sort((a, b) => b.samples - a.samples)
-      .slice(0, 10); // Top 10
-    
-    sortedDigraphs.forEach(d => {
+    for (const pair of rows) {
       const row = tbody.insertRow();
-      row.innerHTML = `
-        <td>${d.digraph}</td>
-        <td>${d.ddMean.toFixed(0)}ms</td>
-        <td>${d.udMean.toFixed(0)}ms</td>
-        <td>${d.samples}</td>
-      `;
-    });
+      for (const value of [pair.keys.join(' → '), ms(average(pair.DD)), ms(average(pair.UD)),
+        pair.DD.length + ' / ' + pair.UD.length]) row.insertCell().textContent = value;
+    }
   }
 
   function saveProfile() {
-    if (!state.metrics.totalKeys) return;
-    
-    const rawName = prompt('Enter profile name:');
-    if (!rawName) return;
-    
-    // Sanitize and validate profile name
-    const name = rawName.trim().slice(0, 50).replace(/[<>"/\\&]/g, '');
-    if (name.length === 0) {
-      alert('Invalid profile name. Please use alphanumeric characters only.');
+    if (state.running || importing || !state.metrics.totalKeys) return;
+    if (state.profiles.length >= Core.LIMITS.profiles) {
+      notify('profileLimit');
       return;
     }
-    
-    const profile = {
-      name,
-      timestamp: Date.now(),
-      metrics: state.metrics,
-      events: state.events,
-      digraphs: Array.from(state.digraphs.entries()),
-      text: els.editor.value
-    };
-    
-    state.profiles.push(profile);
-    saveProfiles();
-    
-    alert(`Profile "${name}" saved!`);
-    
-    // Update UI to enable Export/Compare buttons
-    updateUI();
+    const name = prompt(t('namePrompt'));
+    if (name === null) return;
+    try {
+      const profile = Core.validateProfiles([{ version: 2, name, timestamp: Date.now(),
+        text: els.editor.value, events: state.events, context: state.context }])[0];
+      state.profiles = Core.mergeProfiles(state.profiles, [profile]);
+      document.getElementById('comparison').textContent = '';
+      notify(saveProfiles() ? 'saved' :
+        'saveFailed');
+      updateUI();
+    } catch {
+      notify('invalidSave');
+    }
   }
 
   function loadProfiles() {
     try {
       const saved = localStorage.getItem('keystroke_profiles');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Validate the structure to prevent injection
-        if (Array.isArray(parsed)) {
-          state.profiles = parsed.filter(profile => 
-            profile && 
-            typeof profile === 'object' && 
-            typeof profile.name === 'string' && 
-            profile.name.length <= 100 && // Limit name length
-            profile.timestamp &&
-            profile.metrics &&
-            typeof profile.metrics === 'object'
-          ).slice(0, 50); // Limit to 50 profiles max
-        } else {
-          console.warn('Invalid profiles format');
-          state.profiles = [];
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load profiles:', e);
+      if (saved) state.profiles = Core.parseProfiles(saved);
+    } catch {
       state.profiles = [];
+      notify('loadFailed');
     }
   }
 
   function saveProfiles() {
     try {
-      localStorage.setItem('keystroke_profiles', JSON.stringify(state.profiles));
-    } catch (e) {
-      console.error('Failed to save profiles:', e);
+      const json = Core.exportProfiles(state.profiles);
+      if (new TextEncoder().encode(json).length > Core.LIMITS.bytes) return false;
+      localStorage.setItem('keystroke_profiles', json);
+      return true;
+    } catch {
+      return false;
     }
   }
 
+  function deleteProfiles() {
+    if (state.running || importing || !confirm(t('deleteConfirm'))) return;
+    try {
+      localStorage.removeItem('keystroke_profiles');
+      state.profiles = [];
+      document.getElementById('comparison').textContent = '';
+      notify('deleted');
+    } catch {
+      notify('deleteFailed');
+    }
+    updateUI();
+  }
+
   function exportJSON() {
-    if (state.profiles.length === 0) return;
-    
-    const dataStr = JSON.stringify(state.profiles, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-    
+    if (!state.profiles.length) return;
+    const blob = new Blob([Core.exportProfiles(state.profiles)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', dataUri);
-    link.setAttribute('download', 'keystroke_profiles.json');
+    link.href = url;
+    link.download = 'keystroke_profiles.json';
     link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function importJSON() {
-    els.fileInput.click();
+    if (!state.running && !importing) els.fileInput.click();
   }
 
-  function handleFileImport(e) {
+  async function handleFileImport(e) {
     const file = e.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = function(event) {
-      try {
-        const imported = JSON.parse(event.target.result);
-        if (Array.isArray(imported)) {
-          state.profiles = [...state.profiles, ...imported];
-          saveProfiles();
-          alert(`Imported ${imported.length} profiles!`);
-          updateUI();
-        } else {
-          alert('Invalid profile format');
-        }
-      } catch (err) {
-        alert('Failed to import profiles: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-    
-    // Reset file input
     e.target.value = '';
+    if (!file || state.running || importing) return;
+    if (file.size > Core.LIMITS.bytes) {
+      notify('sizeLimit');
+      return;
+    }
+    importing = true;
+    updateUI();
+    try {
+      const profiles = Core.parseProfiles(await file.text());
+      state.profiles = Core.mergeProfiles(state.profiles, profiles);
+      document.getElementById('comparison').textContent = '';
+      notify(saveProfiles() ? 'imported' :
+        'importUnsaved');
+    } catch {
+      notify('invalidImport');
+    } finally {
+      importing = false;
+      updateUI();
+    }
   }
 
   function compareProfiles() {
     if (state.profiles.length < 2) return;
-    
-    // Simple comparison: show similarity scores
-    let comparison = 'Profile Comparison\n\n';
-    
+    const lines = [t('cosineNote')];
     for (let i = 0; i < state.profiles.length - 1; i++) {
       for (let j = i + 1; j < state.profiles.length; j++) {
-        const p1 = state.profiles[i];
-        const p2 = state.profiles[j];
-        
-        const similarity = calculateSimilarity(p1.metrics, p2.metrics);
-        comparison += `${p1.name} vs ${p2.name}: ${(similarity * 100).toFixed(1)}% similar\n`;
+        const a = state.profiles[i], b = state.profiles[j];
+        const value = Core.comparable(a, b) ? Core.cosine(a.metrics, b.metrics) : null;
+        lines.push(a.name + ' / ' + b.name + ': ' +
+          (value === null ? t('incomparable') : value.toFixed(4)));
       }
     }
-    
-    alert(comparison);
+    document.getElementById('comparison').textContent = lines.join('\n');
   }
 
-  function calculateSimilarity(m1, m2) {
-    // Simple similarity based on timing metrics
-    const features1 = [m1.avgDwell, m1.avgFlight, m1.avgDD];
-    const features2 = [m2.avgDwell, m2.avgFlight, m2.avgDD];
-    
-    // Cosine similarity
-    const dotProduct = features1.reduce((sum, val, i) => sum + val * features2[i], 0);
-    const mag1 = Math.sqrt(features1.reduce((sum, val) => sum + val * val, 0));
-    const mag2 = Math.sqrt(features2.reduce((sum, val) => sum + val * val, 0));
-    
-    return dotProduct / (mag1 * mag2);
-  }
 
   // Start the app
   document.addEventListener('DOMContentLoaded', init);

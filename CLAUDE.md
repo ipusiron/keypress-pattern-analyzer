@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-KeyPress Pattern Analyzer is a fully functional web-based tool for analyzing keystroke dynamics and typing patterns. It captures and visualizes timing patterns in keyboard input to demonstrate keystroke biometric authentication concepts for security education and research.
+KeyPress Pattern Analyzer is a fully functional web-based tool for analyzing keystroke dynamics and typing patterns. It captures and visualizes timing patterns for education. It does not verify identity, assess impersonation resistance or provide authentication scores.
 
 ## Architecture
 
 Pure frontend application (no build process, no dependencies):
 
-- **index.html**: Single-page HTML with semantic structure, Content Security Policy headers, and accessibility features
-- **script.js**: Self-contained IIFE (~1900 lines) implementing all capture, analysis, and visualization logic
+- **index.html**: Single-page HTML with semantic structure, a meta CSP, and accessibility features
+- **script.js**: Self-contained IIFE implementing capture, UI state and visualization logic; timing and validation are in logic.js
 - **style.css**: CSS custom properties for theming (light/dark mode) with visualization-specific variables
 - **Data persistence**: localStorage for profiles, JSON export/import for portability
 
@@ -21,7 +21,9 @@ Pure frontend application (no build process, no dependencies):
 - **Event Capture**: `handleKeyDown`/`handleKeyUp` use `performance.now()` for high-precision timestamps
 - **Metrics Calculation**: `calculateMetrics()` computes dwell times, flight times, DD/UD intervals, WPM
 - **Visualizations**: Three Canvas-based renderers (`renderTimeline`, `renderRhythm`, `renderHeatmap`) with theme-aware colors via `getThemeColors()`
-- **Analysis Engine**: `analyzeKeystrokePattern()` generates 8-point security evaluation with detailed scoring
+- **Core**: logic.js provides DOM-independent timing, validation and cosine comparison; CommonJS tests and classic browser scripts support file URLs.
+- **Messages**: messages.js contains Japanese and English UI text. Re-render derived content on language changes.
+- **Results**: descriptive statistics and limitations only; no authentication suitability ratings.
 
 ### Key Data Structures
 
@@ -30,7 +32,7 @@ Pure frontend application (no build process, no dependencies):
 { type: 'down'|'up', code: string, key: string, t: number, dwell?: number }
 
 // Digraph timings (stored in Map)
-{ DD: number[], UD: number[], DU: number[], UU: number[] }
+{ keys: [string, string], DD: number[], UD: number[] }
 
 // Metrics object
 { totalKeys, duration, avgDwell, stdDwell, avgFlight, stdFlight, avgDD, stdDD, wpm, dwellTimes[], flightTimes[], ddTimes[] }
@@ -45,21 +47,28 @@ No build step required. Open `index.html` directly in browser or serve via any s
 python -m http.server 8000
 
 # Using Node.js (npx)
-npx serve .
+npm test
 ```
 
-GitHub Pages deployment configured via `.nojekyll` file.
+GitHub Pages deploys the main branch root. The `.nojekyll` file disables Jekyll processing.
 
 ## Technical Notes
 
 - IME composition filtering via `e.isComposing` check (toggleable)
-- Event limit of 10,000 keystrokes to prevent memory exhaustion
-- Input sanitization: key codes limited to 50 chars, key values to 10 chars
-- Profile names sanitized and limited to 50 chars, max 50 profiles stored
+- Event limit of 10,000 events (down, up and break combined) to prevent memory exhaustion
+- Input sanitization: key codes limited to 50 chars, key values to 50 chars
+- Profile names limited to 50 UTF-16 code units, max 50 profiles; raw text and events are saved without anonymization
 - Canvas visualizations use configurable sizing via CSS custom properties (`--viz-*`)
-- Tooltip system supports both hover and touch for mobile accessibility
+- Help buttons open a native dialog with keyboard and touch support
 
 ## Related Documentation
 
-- **ALGORITHMS.md**: Detailed calculation formulas for all timing metrics and security scoring
-- **TECHNICAL.md**: Authentication theory, similarity calculations, and integration patterns
+- **ALGORITHMS.md**: Timing formulas and missing observations
+- **TECHNICAL.md**: Measurement limitations and distinctions from authentication research
+## Verification and publication
+
+Run npm test on Node.js 22; do not install dependencies. Test known timing fixtures, import failures, empty runs and storage failures.
+Validate Japanese/English, both themes, narrow layouts, HTTP and file URLs in available browsers.
+Back up existing screenshots outside this repository before replacing them. Preserve the README metadata structure.
+Use a working branch and PR, not a direct push to main. Do not weaken tests to make CI pass.
+Never log raw keystrokes or typed text. JSON imports are untrusted; recompute all derived metrics.
