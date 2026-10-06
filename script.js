@@ -6,6 +6,14 @@
  */
 
 (function () {
+  const Core = window.KeystrokeCore;
+  let captureTimer = null;
+  let composing = false;
+  let importing = false;
+  function notify(message) {
+    document.getElementById('status').textContent = message;
+  }
+  const ms = value => Number.isFinite(value) ? value.toFixed(1) + ' ms' : '—';
   // DOM refs
   const els = {
     mode: document.getElementById('mode'),
@@ -39,6 +47,7 @@
     metrics: {},  // Calculated metrics
     profiles: [], // Saved profiles
     currentProfile: null,
+    context: null,
     keyStates: new Map(), // Track key press states
     digraphs: new Map(), // Track digraph timings
   };
@@ -439,6 +448,20 @@
     
     els.editor.addEventListener('keydown', handleKeyDown);
     els.editor.addEventListener('keyup', handleKeyUp);
+    els.editor.addEventListener('blur', () => stopCapture('入力欄から離れたため停止しました。未解放キーは欠測です。'));
+    window.addEventListener('blur', () => stopCapture('ウィンドウから離れたため停止しました。'));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopCapture('ページが非表示になったため停止しました。');
+    });
+    els.editor.addEventListener('compositionstart', () => { composing = true; compositionBoundary(); });
+    els.editor.addEventListener('compositionend', () => { composing = false; compositionBoundary(); });
+    els.editor.addEventListener('input', () => {
+      if (els.editor.value.length > Core.LIMITS.text) {
+        els.editor.value = els.editor.value.slice(0, Core.LIMITS.text);
+        stopCapture('入力文字数の上限で停止しました。');
+      }
+    });
+    document.getElementById('btnDelete').addEventListener('click', deleteProfiles);
     
     els.mode.addEventListener('change', updateMode);
     
@@ -469,66 +492,44 @@
   }
 
   function startCapture() {
-    if (state.running) return;
-    
+    if (state.running || importing) return;
+    clearAll();
     state.running = true;
     state.startedAt = performance.now();
-    state.events = [];
-    state.keyStates.clear();
-    state.digraphs.clear();
-    
-    els.editor.value = '';
-    els.editor.focus();
-    
+    state.context = { mode: els.mode.value, phrase: els.phrase.value,
+      ignoreIME: els.imeToggle.checked, imeUsed: false };
     updateUI();
+    els.editor.focus();
+    notify('記録中です。秘密情報は入力しないでください。');
+    captureTimer = setTimeout(() => stopCapture('時間上限で停止しました。'), Core.LIMITS.time);
   }
 
-  function stopCapture() {
+  function stopCapture(message) {
     if (!state.running) return;
-    
     state.running = false;
-    
-    console.log('Debug: Events captured:', state.events.length);
-    console.log('Debug: Events:', state.events.slice(0, 5)); // Log first 5 events
-    
+    clearTimeout(captureTimer);
     calculateMetrics();
-    console.log('Debug: Metrics calculated:', state.metrics);
-    
+    state.keyStates.clear();
     updateUI();
-    
-    try {
-      renderVisualizations();
-      console.log('Debug: Visualizations rendered');
-    } catch (error) {
-      console.error('Error rendering visualizations:', error);
-    }
-    
-    try {
-      renderDigraphTable();
-      console.log('Debug: Digraph table rendered');
-    } catch (error) {
-      console.error('Error rendering digraph table:', error);
-    }
-    
-    try {
-      performAnalysis();
-      console.log('Debug: Analysis performed');
-    } catch (error) {
-      console.error('Error performing analysis:', error);
-    }
+    renderVisualizations();
+    renderDigraphTable();
+    hideAnalysis();
+    notify(typeof message === 'string' ? message : '記録を停止しました。');
   }
 
   function clearAll() {
+    clearTimeout(captureTimer);
     state.running = false;
     state.events = [];
     state.metrics = {};
     state.keyStates.clear();
     state.digraphs.clear();
     els.editor.value = '';
-    
+    composing = false;
     updateUI();
     clearVisualizations();
     hideAnalysis();
+    notify('');
   }
 
   function performAnalysis() {
@@ -898,163 +899,56 @@
     document.getElementById('analysisSection').style.display = 'none';
   }
 
-  function handleKeyDown(e) {
+  function recordEvent(event) {
+    if (!state.running) return false;
+    const elapsed = performance.now() - state.startedAt;
+    if (elapsed > Core.LIMITS.time || state.events.length >= Core.LIMITS.events) {
+      stopCapture('記録の上限で停止しました。');
+      return false;
+    }
+    state.events.push({ ...event, t: Math.max(0, elapsed) });
+    if (state.events.length === Core.LIMITS.events) stopCapture('記録の上限で停止しました。');
+    return true;
+  }
+
+  function compositionBoundary() {
     if (!state.running) return;
-    
-    // Skip if IME composition and toggle is checked
-    if (els.imeToggle.checked && e.isComposing) return;
-    
-    // Skip if key is already pressed (key repeat)
-    if (state.keyStates.has(e.code)) return;
-    
-    // Validate and sanitize key information
-    const sanitizedCode = e.code ? e.code.slice(0, 50) : 'Unknown'; // Limit length
-    const sanitizedKey = e.key ? e.key.slice(0, 10) : 'Unknown'; // Limit length
-    
-    const t = performance.now() - state.startedAt;
-    const event = {
-      type: 'down',
-      code: sanitizedCode,
-      key: sanitizedKey,
-      t: t
-    };
-    
-    // Limit total events to prevent memory exhaustion
-    if (state.events.length < 10000) {
-      state.events.push(event);
-      state.keyStates.set(sanitizedCode, { downTime: t, key: sanitizedKey });
+    state.context.imeUsed = true;
+    state.keyStates.clear();
+    recordEvent({ type: 'break' });
+  }
+
+  function handleKeyDown(e) {
+    if (!state.running || e.repeat) return;
+    if (els.imeToggle.checked && (e.isComposing || composing || e.keyCode === 229)) {
+      compositionBoundary();
+      return;
     }
-    
-    // Track digraph timing (DD - down to down)
-    if (state.events.length >= 2) {
-      const prevDown = findLastDownEvent(state.events.length - 2);
-      if (prevDown) {
-        const digraph = prevDown.key + e.key;
-        if (!state.digraphs.has(digraph)) {
-          state.digraphs.set(digraph, { DD: [], UD: [], DU: [], UU: [] });
-        }
-        state.digraphs.get(digraph).DD.push(t - prevDown.t);
-      }
-    }
+    const code = (e.code || 'Unknown').slice(0, 50);
+    if (state.keyStates.has(code)) return;
+    const key = (e.key || 'Unknown').slice(0, 50);
+    if (recordEvent({ type: 'down', code, key }) && state.running) state.keyStates.set(code, key);
   }
 
   function handleKeyUp(e) {
-    if (!state.running) return;
-    
-    // Skip if IME composition and toggle is checked
-    if (els.imeToggle.checked && e.isComposing) return;
-    
-    const keyState = state.keyStates.get(e.code);
-    if (!keyState) return;
-    
-    const t = performance.now() - state.startedAt;
-    const event = {
-      type: 'up',
-      code: e.code,
-      key: e.key,
-      t: t,
-      dwell: t - keyState.downTime // Dwell time
-    };
-    
-    state.events.push(event);
-    state.keyStates.delete(e.code);
-    
-    // Track digraph timing (UD - up to down)
-    const nextDownIdx = findNextDownEvent(state.events.length - 1);
-    if (nextDownIdx !== -1) {
-      const nextDown = state.events[nextDownIdx];
-      const digraph = e.key + nextDown.key;
-      if (!state.digraphs.has(digraph)) {
-        state.digraphs.set(digraph, { DD: [], UD: [], DU: [], UU: [] });
-      }
-      state.digraphs.get(digraph).UD.push(nextDown.t - t);
-    }
-  }
-
-  function findLastDownEvent(fromIndex) {
-    for (let i = fromIndex; i >= 0; i--) {
-      if (state.events[i].type === 'down') {
-        return state.events[i];
-      }
-    }
-    return null;
-  }
-
-  function findNextDownEvent(fromIndex) {
-    for (let i = fromIndex + 1; i < state.events.length; i++) {
-      if (state.events[i].type === 'down') {
-        return i;
-      }
-    }
-    return -1;
+    if (!state.running || (els.imeToggle.checked && (e.isComposing || composing || e.keyCode === 229))) return;
+    const code = (e.code || 'Unknown').slice(0, 50);
+    if (!state.keyStates.has(code)) return;
+    const key = state.keyStates.get(code);
+    state.keyStates.delete(code);
+    recordEvent({ type: 'up', code, key });
   }
 
   function calculateMetrics() {
-    const events = state.events;
-    if (events.length === 0) return;
-    
-    const downEvents = events.filter(e => e.type === 'down');
-    const upEvents = events.filter(e => e.type === 'up');
-    
-    // Calculate dwell times
-    const dwellTimes = upEvents.map(e => e.dwell).filter(d => d !== undefined);
-    
-    // Calculate flight times (time between key up and next key down)
-    const flightTimes = [];
-    for (let i = 0; i < events.length - 1; i++) {
-      if (events[i].type === 'up') {
-        for (let j = i + 1; j < events.length; j++) {
-          if (events[j].type === 'down') {
-            flightTimes.push(events[j].t - events[i].t);
-            break;
-          }
-        }
-      }
-    }
-    
-    // Calculate DD times (down to down)
-    const ddTimes = [];
-    for (let i = 0; i < downEvents.length - 1; i++) {
-      ddTimes.push(downEvents[i + 1].t - downEvents[i].t);
-    }
-    
-    state.metrics = {
-      totalKeys: downEvents.length,
-      duration: events[events.length - 1].t,
-      avgDwell: average(dwellTimes),
-      stdDwell: standardDeviation(dwellTimes),
-      avgFlight: average(flightTimes),
-      stdFlight: standardDeviation(flightTimes),
-      avgDD: average(ddTimes),
-      stdDD: standardDeviation(ddTimes),
-      wpm: calculateWPM(els.editor.value, events[events.length - 1].t),
-      dwellTimes,
-      flightTimes,
-      ddTimes
-    };
+    state.metrics = Core.analyze(state.events, els.editor.value);
+    state.digraphs = state.metrics.digraphs;
   }
 
-  function average(arr) {
-    if (arr.length === 0) return 0;
-    return arr.reduce((a, b) => a + b, 0) / arr.length;
-  }
-
-  function standardDeviation(arr) {
-    if (arr.length === 0) return 0;
-    const avg = average(arr);
-    const squareDiffs = arr.map(value => Math.pow(value - avg, 2));
-    return Math.sqrt(average(squareDiffs));
-  }
-
-  function calculateWPM(text, durationMs) {
-    const words = text.trim().split(/\s+/).length;
-    const minutes = durationMs / 60000;
-    return minutes > 0 ? Math.round(words / minutes) : 0;
-  }
+  const average = values => Core.mean(values);
 
   function updateUI() {
     // Enable/disable buttons
-    els.btnStart.disabled = state.running;
+    els.btnStart.disabled = state.running || importing;
     els.btnStop.disabled = !state.running;
     els.btnClear.disabled = state.running;
     els.editor.disabled = !state.running;
@@ -1062,10 +956,11 @@
     els.imeToggle.disabled = state.running;
     els.phrase.disabled = state.running || els.mode.value !== 'custom';
     
-    els.btnSave.disabled = !state.metrics.totalKeys;
+    els.btnSave.disabled = state.running || importing || !state.metrics.totalKeys;
     els.btnExport.disabled = state.profiles.length === 0;
-    els.btnImport.disabled = state.running;
-    els.btnCompare.disabled = state.profiles.length < 2;
+    els.btnImport.disabled = state.running || importing;
+    els.btnCompare.disabled = state.running || state.profiles.length < 2;
+    document.getElementById('btnDelete').disabled = state.running || importing || !state.profiles.length;
     
     // Update summary stats
     const statsContainer = document.querySelector('.grid.three');
@@ -1084,7 +979,7 @@
         <div class="stat">
           <span class="stat-help" title="Dwell: キー押下時間の平均 / DD: 連続キー間隔の平均">?</span>
           <div class="stat__label">Avg Dwell / DD</div>
-          <div class="stat__value">${state.metrics.avgDwell.toFixed(0)}ms / ${state.metrics.avgDD.toFixed(0)}ms</div>
+          <div class="stat__value">${ms(state.metrics.avgDwell)} / ${ms(state.metrics.avgDD)}</div>
         </div>
       `;
     } else {
@@ -1754,175 +1649,128 @@
 
   function renderDigraphTable() {
     const tbody = document.querySelector('table tbody');
-    tbody.innerHTML = '';
-    
-    if (state.digraphs.size === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="muted center">No digraph data</td></tr>';
-      return;
+    tbody.replaceChildren();
+    const rows = [...state.digraphs.values()].sort((a, b) => b.DD.length - a.DD.length).slice(0, 10);
+    if (!rows.length) {
+      const cell = tbody.insertRow().insertCell();
+      cell.colSpan = 4;
+      cell.textContent = 'データなし';
     }
-    
-    // Sort digraphs by frequency
-    const sortedDigraphs = Array.from(state.digraphs.entries())
-      .map(([digraph, timings]) => ({
-        digraph,
-        ddMean: average(timings.DD),
-        udMean: average(timings.UD),
-        samples: timings.DD.length
-      }))
-      .filter(d => d.samples > 0)
-      .sort((a, b) => b.samples - a.samples)
-      .slice(0, 10); // Top 10
-    
-    sortedDigraphs.forEach(d => {
+    for (const pair of rows) {
       const row = tbody.insertRow();
-      row.innerHTML = `
-        <td>${d.digraph}</td>
-        <td>${d.ddMean.toFixed(0)}ms</td>
-        <td>${d.udMean.toFixed(0)}ms</td>
-        <td>${d.samples}</td>
-      `;
-    });
+      for (const value of [pair.keys.join(' → '), ms(average(pair.DD)), ms(average(pair.UD)),
+        pair.DD.length + ' / ' + pair.UD.length]) row.insertCell().textContent = value;
+    }
   }
 
   function saveProfile() {
-    if (!state.metrics.totalKeys) return;
-    
-    const rawName = prompt('Enter profile name:');
-    if (!rawName) return;
-    
-    // Sanitize and validate profile name
-    const name = rawName.trim().slice(0, 50).replace(/[<>"/\\&]/g, '');
-    if (name.length === 0) {
-      alert('Invalid profile name. Please use alphanumeric characters only.');
+    if (state.running || importing || !state.metrics.totalKeys) return;
+    if (state.profiles.length >= Core.LIMITS.profiles) {
+      notify('保存上限は50件です。保存プロファイルを削除してください。');
       return;
     }
-    
-    const profile = {
-      name,
-      timestamp: Date.now(),
-      metrics: state.metrics,
-      events: state.events,
-      digraphs: Array.from(state.digraphs.entries()),
-      text: els.editor.value
-    };
-    
-    state.profiles.push(profile);
-    saveProfiles();
-    
-    alert(`Profile "${name}" saved!`);
-    
-    // Update UI to enable Export/Compare buttons
-    updateUI();
+    const name = prompt('プロファイル名（50文字以内）');
+    if (name === null) return;
+    try {
+      const profile = Core.validateProfiles([{ version: 2, name, timestamp: Date.now(),
+        text: els.editor.value, events: state.events, context: state.context }])[0];
+      state.profiles.push(profile);
+      notify(saveProfiles() ? 'プロファイルを保存しました。' :
+        '永続保存に失敗しました。この画面内には残っています。JSONを出力してください。');
+      updateUI();
+    } catch {
+      notify('保存できません。名前・記録データを確認してください。');
+    }
   }
 
   function loadProfiles() {
     try {
       const saved = localStorage.getItem('keystroke_profiles');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Validate the structure to prevent injection
-        if (Array.isArray(parsed)) {
-          state.profiles = parsed.filter(profile => 
-            profile && 
-            typeof profile === 'object' && 
-            typeof profile.name === 'string' && 
-            profile.name.length <= 100 && // Limit name length
-            profile.timestamp &&
-            profile.metrics &&
-            typeof profile.metrics === 'object'
-          ).slice(0, 50); // Limit to 50 profiles max
-        } else {
-          console.warn('Invalid profiles format');
-          state.profiles = [];
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load profiles:', e);
+      if (saved) state.profiles = Core.parseProfiles(saved);
+    } catch {
       state.profiles = [];
+      notify('保存済みデータを読み込めません。元の保存内容は変更していません。');
     }
   }
 
   function saveProfiles() {
     try {
-      localStorage.setItem('keystroke_profiles', JSON.stringify(state.profiles));
-    } catch (e) {
-      console.error('Failed to save profiles:', e);
+      const json = Core.exportProfiles(state.profiles);
+      if (new TextEncoder().encode(json).length > Core.LIMITS.bytes) return false;
+      localStorage.setItem('keystroke_profiles', json);
+      return true;
+    } catch {
+      return false;
     }
   }
 
+  function deleteProfiles() {
+    if (state.running || importing || !confirm('保存済みプロファイルをすべて削除しますか？')) return;
+    try {
+      localStorage.removeItem('keystroke_profiles');
+      state.profiles = [];
+      document.getElementById('comparison').textContent = '';
+      notify('保存済みプロファイルを削除しました。ダウンロード済みJSONは削除されません。');
+    } catch {
+      notify('削除に失敗しました。ブラウザーのサイトデータ設定から削除してください。');
+    }
+    updateUI();
+  }
+
   function exportJSON() {
-    if (state.profiles.length === 0) return;
-    
-    const dataStr = JSON.stringify(state.profiles, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-    
+    if (!state.profiles.length) return;
+    const blob = new Blob([Core.exportProfiles(state.profiles)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', dataUri);
-    link.setAttribute('download', 'keystroke_profiles.json');
+    link.href = url;
+    link.download = 'keystroke_profiles.json';
     link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function importJSON() {
-    els.fileInput.click();
+    if (!state.running && !importing) els.fileInput.click();
   }
 
-  function handleFileImport(e) {
+  async function handleFileImport(e) {
     const file = e.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = function(event) {
-      try {
-        const imported = JSON.parse(event.target.result);
-        if (Array.isArray(imported)) {
-          state.profiles = [...state.profiles, ...imported];
-          saveProfiles();
-          alert(`Imported ${imported.length} profiles!`);
-          updateUI();
-        } else {
-          alert('Invalid profile format');
-        }
-      } catch (err) {
-        alert('Failed to import profiles: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-    
-    // Reset file input
     e.target.value = '';
+    if (!file || state.running || importing) return;
+    if (file.size > Core.LIMITS.bytes) {
+      notify('JSONは5,000,000バイト以下にしてください。');
+      return;
+    }
+    importing = true;
+    updateUI();
+    try {
+      const profiles = Core.parseProfiles(await file.text());
+      if (state.profiles.length + profiles.length > Core.LIMITS.profiles) throw new Error('count');
+      state.profiles = [...state.profiles, ...profiles];
+      document.getElementById('comparison').textContent = '';
+      notify(saveProfiles() ? '検証済みプロファイルを読み込み、保存しました。' :
+        '読込は完了しましたが永続保存に失敗しました。JSONを出力してください。');
+    } catch {
+      notify('読込を拒否しました。JSONの形式・値・件数を確認してください。既存データは変更していません。');
+    } finally {
+      importing = false;
+      updateUI();
+    }
   }
 
   function compareProfiles() {
     if (state.profiles.length < 2) return;
-    
-    // Simple comparison: show similarity scores
-    let comparison = 'Profile Comparison\n\n';
-    
+    const lines = ['コサイン類似度（本人一致率ではありません）。全時間が2倍でも1になります。'];
     for (let i = 0; i < state.profiles.length - 1; i++) {
       for (let j = i + 1; j < state.profiles.length; j++) {
-        const p1 = state.profiles[i];
-        const p2 = state.profiles[j];
-        
-        const similarity = calculateSimilarity(p1.metrics, p2.metrics);
-        comparison += `${p1.name} vs ${p2.name}: ${(similarity * 100).toFixed(1)}% similar\n`;
+        const a = state.profiles[i], b = state.profiles[j];
+        const value = Core.comparable(a, b) ? Core.cosine(a.metrics, b.metrics) : null;
+        lines.push(a.name + ' / ' + b.name + ': ' +
+          (value === null ? '比較不可（欠測・条件不一致・条件不明・ゼロベクトル）' : value.toFixed(4)));
       }
     }
-    
-    alert(comparison);
+    document.getElementById('comparison').textContent = lines.join('\n');
   }
 
-  function calculateSimilarity(m1, m2) {
-    // Simple similarity based on timing metrics
-    const features1 = [m1.avgDwell, m1.avgFlight, m1.avgDD];
-    const features2 = [m2.avgDwell, m2.avgFlight, m2.avgDD];
-    
-    // Cosine similarity
-    const dotProduct = features1.reduce((sum, val, i) => sum + val * features2[i], 0);
-    const mag1 = Math.sqrt(features1.reduce((sum, val) => sum + val * val, 0));
-    const mag2 = Math.sqrt(features2.reduce((sum, val) => sum + val * val, 0));
-    
-    return dotProduct / (mag1 * mag2);
-  }
 
   // Start the app
   document.addEventListener('DOMContentLoaded', init);

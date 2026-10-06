@@ -25,6 +25,7 @@
   </header>
 
   <main class="container">
+    <p id="status" role="status" aria-live="polite"></p>
     <!-- ====== モード・設定 ====== -->
     <section class="card">
       <div class="section-header">
@@ -113,7 +114,7 @@
       </div>
 
       <label for="editor" class="sr-only">Input Area</label>
-      <textarea id="editor" class="editor" rows="6" placeholder="Click Start to begin recording" disabled></textarea>
+      <textarea id="editor" class="editor" rows="6" maxlength="20000" placeholder="Click Start to begin recording" disabled></textarea>
 
       <p class="muted small">
         ※ Startボタンをクリックしてキーストローク記録を開始してください。
@@ -292,7 +293,9 @@
         <button id="btnExport" disabled data-tooltip="全プロファイルをJSONファイルで出力">Export JSON</button>
         <button id="btnImport" disabled data-tooltip="JSONファイルからプロファイルを読み込み">Import JSON</button>
         <button id="btnCompare" disabled data-tooltip="保存済みプロファイルの類似度を比較">Compare</button>
+        <button id="btnDelete" disabled>保存プロファイルを全削除</button>
       </div>
+      <p id="comparison"></p>
       <p class="muted small">記録後にプロファイルを保存して、タイピングパターンを比較できます。</p>
     </section>
   </main>
@@ -306,6 +309,7 @@
       ）
   </footer>
 
+  <script src="./logic.js" defer></script>
   <script src="./script.js" defer></script>
 </body>
 </html>
