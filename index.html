@@ -10,15 +10,19 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self';
     img-src 'self' data:; connect-src 'none'; object-src 'none'; media-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="icon" href="data:,">
   <script src="./theme-init.js"></script>
   
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <!-- Theme Toggle Button -->
+  <div class="preferences">
+  <button id="languageToggle" lang="en">English</button>
   <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
     <span id="themeIcon">☀️</span>
   </button>
+  </div>
 
   <header class="site-header">
     <h1>KeyPress Pattern Analyzer</h1>
@@ -70,7 +74,7 @@
         <div>
           <label for="imeToggle">
             <input id="imeToggle" type="checkbox" checked>
-            Ignore IME composition（推奨）
+            <span id="imeLabel">IME変換中のキーイベントを除外する</span>
             <span class="help-icon">
               ?
               <div class="tooltip">
@@ -117,7 +121,7 @@
       <label for="editor" class="sr-only">Input Area</label>
       <textarea id="editor" class="editor" rows="6" maxlength="20000" placeholder="Click Start to begin recording" disabled></textarea>
 
-      <p class="muted small">
+      <p id="captureNote" class="muted small">
         ※ Startボタンをクリックしてキーストローク記録を開始してください。
       </p>
     </section>
@@ -299,17 +303,17 @@
       </div>
       <p id="comparison"></p>
       <p id="profileCount"></p>
-      <p class="muted small">記録後にプロファイルを保存して、タイピングパターンを比較できます。</p>
+      <p id="privacyNote" class="muted small">入力本文・キー列も保存されます。</p>
     </section>
   </main>
 
   <footer>
     <div class="footer">
-      🔗 GitHubリポジトリはこちら（
+      🔗 GitHub (
       <a href="https://github.com/ipusiron/keypress-pattern-analyzer" target="_blank" rel="noopener">
         ipusiron/keypress-pattern-analyzer
       </a>
-      ）
+      )
     </div>
   </footer>
   <dialog id="helpDialog" aria-labelledby="helpTitle">
@@ -318,6 +322,7 @@
     <button id="helpClose">閉じる</button>
   </dialog>
 
+  <script src="./messages.js" defer></script>
   <script src="./logic.js" defer></script>
   <script src="./script.js" defer></script>
 </body>

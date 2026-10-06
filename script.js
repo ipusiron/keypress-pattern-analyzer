@@ -7,11 +7,16 @@
 
 (function () {
   const Core = window.KeystrokeCore;
+  let language = 'ja';
+  try { if (localStorage.getItem('language') === 'en') language = 'en'; } catch { /* Optional. */ }
+  let statusKey = '';
+  const t = key => window.KeystrokeMessages[language][key];
   let captureTimer = null;
   let composing = false;
   let importing = false;
   function notify(message) {
-    document.getElementById('status').textContent = message;
+    statusKey = message;
+    document.getElementById('status').textContent = message ? t(message) : '';
   }
   const ms = value => Number.isFinite(value) ? value.toFixed(1) + ' ms' : '—';
   // DOM refs
@@ -219,11 +224,49 @@
     initTooltips();
     updateUI();
     els.phrase.value = DEFAULT_PHRASE;
+    applyLanguage();
     clearVisualizations(); // Show initial keyboard layout
     window.addEventListener('resize', () => {
       if (state.metrics.totalKeys) renderVisualizations();
       else clearVisualizations();
     });
+  }
+
+  function applyLanguage() {
+    document.documentElement.lang = language;
+    const set = (selector, key) => {
+      const el = document.querySelector(selector);
+      if (el) el.textContent = t(key);
+    };
+    for (const [selector, key] of Object.entries({
+      '.subtitle': 'subtitle', '.note-box': 'note', 'label[for=mode]': 'mode',
+      '#mode option[value=fixed]': 'fixed', '#mode option[value=custom]': 'custom',
+      '#mode option[value=free]': 'free', '#imeLabel': 'ime', 'label[for=phrase]': 'phrase',
+      '#btnStart': 'start', '#btnStop': 'stop', '#btnClear': 'clear', '#btnSave': 'save',
+      '#btnExport': 'export', '#btnImport': 'import', '#btnCompare': 'compare', '#btnDelete': 'delete',
+      'label[for=editor]': 'input', '#captureNote': 'captureNote', '#privacyNote': 'privacy',
+      '#helpTitle': 'help', '#helpClose': 'close', '.analysis-summary h3': 'reading'
+    })) set(selector, key);
+    for (const [selector, key] of [
+      ['main .section-header h2', 'headings'], ['.stat__label', 'stats'],
+      ['.analysis-card h3', 'cards'], ['.metric-label', 'labels'], ['.viz-header h3', 'viz'],
+      ['thead th', 'columns']
+    ]) document.querySelectorAll(selector).forEach((el, i) => { el.textContent = t(key)[i]; });
+    document.querySelectorAll('.help-button').forEach((button, i) => {
+      button.setAttribute('aria-label', t('help'));
+      button.dataset.helpText = t('helps')[i];
+    });
+    document.getElementById('helpDialog').close();
+    document.getElementById('helpText').textContent = '';
+    document.getElementById('themeToggle').setAttribute('aria-label', t('theme'));
+    document.getElementById('languageToggle').textContent = t('languageName');
+    document.getElementById('languageToggle').lang = language === 'ja' ? 'en' : 'ja';
+    notify(statusKey);
+    updateUI();
+    renderDigraphTable();
+    if (state.metrics.totalKeys) { performAnalysis(); renderVisualizations(); }
+    else { hideAnalysis(); clearVisualizations(); }
+    if (document.getElementById('comparison').textContent) compareProfiles();
   }
 
   function initTooltips() {
@@ -234,7 +277,7 @@
       button.type = 'button';
       button.className = 'help-button';
       button.textContent = '?';
-      button.setAttribute('aria-label', '説明');
+      button.setAttribute('aria-label', t('help'));
       button.dataset.help = String(i);
       button.addEventListener('click', () => {
         document.getElementById('helpText').textContent = button.dataset.helpText || text;
@@ -261,6 +304,11 @@
   }
 
   function bindEvents() {
+    document.getElementById('languageToggle').addEventListener('click', () => {
+      language = language === 'ja' ? 'en' : 'ja';
+      try { localStorage.setItem('language', language); } catch { /* Session-only. */ }
+      applyLanguage();
+    });
     els.btnStart.addEventListener('click', startCapture);
     els.btnStop.addEventListener('click', stopCapture);
     els.btnClear.addEventListener('click', clearAll);
@@ -271,17 +319,17 @@
     
     els.editor.addEventListener('keydown', handleKeyDown);
     els.editor.addEventListener('keyup', handleKeyUp);
-    els.editor.addEventListener('blur', () => stopCapture('入力欄から離れたため停止しました。未解放キーは欠測です。'));
-    window.addEventListener('blur', () => stopCapture('ウィンドウから離れたため停止しました。'));
+    els.editor.addEventListener('blur', () => stopCapture('blur'));
+    window.addEventListener('blur', () => stopCapture('windowBlur'));
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) stopCapture('ページが非表示になったため停止しました。');
+      if (document.hidden) stopCapture('hidden');
     });
     els.editor.addEventListener('compositionstart', () => { composing = true; compositionBoundary(); });
     els.editor.addEventListener('compositionend', () => { composing = false; compositionBoundary(); });
     els.editor.addEventListener('input', () => {
       if (els.editor.value.length > Core.LIMITS.text) {
         els.editor.value = els.editor.value.slice(0, Core.LIMITS.text);
-        stopCapture('入力文字数の上限で停止しました。');
+        stopCapture('textLimit');
       }
     });
     document.getElementById('btnDelete').addEventListener('click', deleteProfiles);
@@ -323,8 +371,8 @@
       ignoreIME: els.imeToggle.checked, imeUsed: false };
     updateUI();
     els.editor.focus();
-    notify('記録中です。秘密情報は入力しないでください。');
-    captureTimer = setTimeout(() => stopCapture('時間上限で停止しました。'), Core.LIMITS.time);
+    notify('recording');
+    captureTimer = setTimeout(() => stopCapture('timeLimit'), Core.LIMITS.time);
   }
 
   function stopCapture(message) {
@@ -337,7 +385,7 @@
     renderVisualizations();
     renderDigraphTable();
     performAnalysis();
-    notify(typeof message === 'string' ? message : '記録を停止しました。');
+    notify(typeof message === 'string' ? message : 'stopped');
   }
 
   function clearAll() {
@@ -370,13 +418,7 @@
       uniquenessValue: String(m.interruptions)
     };
     for (const [id, value] of Object.entries(values)) document.getElementById(id).textContent = value;
-    document.getElementById('analysisText').textContent =
-      'UDは次のキーの押下−前のキーの解放です。負の値は押下の重なりを示します。' +
-      '標準偏差はこの記録内のばらつきで、本人固有性や能力を表しません。' +
-      '「—」は試料なし、0 msとは異なります。欠測キーは保持時間に含めません。' +
-      'WPMは最終入力のUnicodeコードポイント数÷5÷記録時間（分）です。訂正後の文字数であり正確性の点数ではありません。' +
-      '本人確認・なりすまし耐性・押す力・疲労は判定できません。' +
-      '入力方式・機器・ブラウザー・練習の影響を受けます。物理キーの時間精度は保証しません。';
+    document.getElementById('analysisText').textContent = t('interpretation');
     showAnalysis();
   }
 
@@ -394,11 +436,11 @@
     if (!state.running) return false;
     const elapsed = performance.now() - state.startedAt;
     if (elapsed > Core.LIMITS.time || state.events.length >= Core.LIMITS.events) {
-      stopCapture('記録の上限で停止しました。');
+      stopCapture('eventLimit');
       return false;
     }
     state.events.push({ ...event, t: Math.max(0, elapsed) });
-    if (state.events.length === Core.LIMITS.events) stopCapture('記録の上限で停止しました。');
+    if (state.events.length === Core.LIMITS.events) stopCapture('eventLimit');
     return true;
   }
 
@@ -456,7 +498,7 @@
     values[1].textContent = m.totalKeys ? (m.duration / 1000).toFixed(2) + ' s' : '—';
     values[2].textContent = m.totalKeys ? ms(m.avgDwell) + ' / ' + ms(m.avgDD) : '—';
     document.getElementById('profileCount').textContent = state.profiles.length + ' / 50';
-    els.editor.placeholder = state.running ? 'Type here…' : 'Click Start to begin recording';
+    els.editor.placeholder = state.running ? t('typePlaceholder') : t('beginPlaceholder');
   }
 
   function renderVisualizations() {
@@ -907,11 +949,11 @@
       ctx.fillStyle = colors.text;
       ctx.font = '11px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText('1回', legendX, legendY + legendBarHeight + 15);
+      ctx.fillText('1' + t('count'), legendX, legendY + legendBarHeight + 15);
       ctx.textAlign = 'right';
-      ctx.fillText(`${maxFreq}回`, legendX + legendWidth, legendY + legendBarHeight + 15);
+      ctx.fillText(maxFreq + t('count'), legendX + legendWidth, legendY + legendBarHeight + 15);
       ctx.textAlign = 'center';
-      ctx.fillText('使用頻度', legendX + legendWidth / 2, legendY + legendBarHeight + 15);
+      ctx.fillText(t('frequency'), legendX + legendWidth / 2, legendY + legendBarHeight + 15);
       
       legendHeight = 50; // Space for legend
     }
@@ -1052,7 +1094,7 @@
     canvas.width = Math.max(minWidth, container.clientWidth - 28);
     canvas.height = container.id === 'heatmap' ? 380 : 200;
     canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', container.id);
+    canvas.setAttribute('aria-label', t('viz')[['timeline', 'rhythm', 'heatmap'].indexOf(container.id)]);
     container.appendChild(canvas);
     return canvas;
   }
@@ -1065,7 +1107,7 @@
     
     // Clear digraph table
     const tbody = document.querySelector('table tbody');
-    tbody.innerHTML = '<tr><td colspan="4" class="muted center">No data</td></tr>';
+    renderDigraphTable();
     
     // Show empty keyboard layout
     renderHeatmap();
@@ -1078,7 +1120,7 @@
     if (!rows.length) {
       const cell = tbody.insertRow().insertCell();
       cell.colSpan = 4;
-      cell.textContent = 'データなし';
+      cell.textContent = t('noData');
     }
     for (const pair of rows) {
       const row = tbody.insertRow();
@@ -1090,20 +1132,20 @@
   function saveProfile() {
     if (state.running || importing || !state.metrics.totalKeys) return;
     if (state.profiles.length >= Core.LIMITS.profiles) {
-      notify('保存上限は50件です。保存プロファイルを削除してください。');
+      notify('profileLimit');
       return;
     }
-    const name = prompt('プロファイル名（50文字以内）');
+    const name = prompt(t('namePrompt'));
     if (name === null) return;
     try {
       const profile = Core.validateProfiles([{ version: 2, name, timestamp: Date.now(),
         text: els.editor.value, events: state.events, context: state.context }])[0];
       state.profiles.push(profile);
-      notify(saveProfiles() ? 'プロファイルを保存しました。' :
-        '永続保存に失敗しました。この画面内には残っています。JSONを出力してください。');
+      notify(saveProfiles() ? 'saved' :
+        'saveFailed');
       updateUI();
     } catch {
-      notify('保存できません。名前・記録データを確認してください。');
+      notify('invalidSave');
     }
   }
 
@@ -1113,7 +1155,7 @@
       if (saved) state.profiles = Core.parseProfiles(saved);
     } catch {
       state.profiles = [];
-      notify('保存済みデータを読み込めません。元の保存内容は変更していません。');
+      notify('loadFailed');
     }
   }
 
@@ -1129,14 +1171,14 @@
   }
 
   function deleteProfiles() {
-    if (state.running || importing || !confirm('保存済みプロファイルをすべて削除しますか？')) return;
+    if (state.running || importing || !confirm(t('deleteConfirm'))) return;
     try {
       localStorage.removeItem('keystroke_profiles');
       state.profiles = [];
       document.getElementById('comparison').textContent = '';
-      notify('保存済みプロファイルを削除しました。ダウンロード済みJSONは削除されません。');
+      notify('deleted');
     } catch {
-      notify('削除に失敗しました。ブラウザーのサイトデータ設定から削除してください。');
+      notify('deleteFailed');
     }
     updateUI();
   }
@@ -1161,7 +1203,7 @@
     e.target.value = '';
     if (!file || state.running || importing) return;
     if (file.size > Core.LIMITS.bytes) {
-      notify('JSONは5,000,000バイト以下にしてください。');
+      notify('sizeLimit');
       return;
     }
     importing = true;
@@ -1171,10 +1213,10 @@
       if (state.profiles.length + profiles.length > Core.LIMITS.profiles) throw new Error('count');
       state.profiles = [...state.profiles, ...profiles];
       document.getElementById('comparison').textContent = '';
-      notify(saveProfiles() ? '検証済みプロファイルを読み込み、保存しました。' :
-        '読込は完了しましたが永続保存に失敗しました。JSONを出力してください。');
+      notify(saveProfiles() ? 'imported' :
+        'importUnsaved');
     } catch {
-      notify('読込を拒否しました。JSONの形式・値・件数を確認してください。既存データは変更していません。');
+      notify('invalidImport');
     } finally {
       importing = false;
       updateUI();
@@ -1183,13 +1225,13 @@
 
   function compareProfiles() {
     if (state.profiles.length < 2) return;
-    const lines = ['コサイン類似度（本人一致率ではありません）。全時間が2倍でも1になります。'];
+    const lines = [t('cosineNote')];
     for (let i = 0; i < state.profiles.length - 1; i++) {
       for (let j = i + 1; j < state.profiles.length; j++) {
         const a = state.profiles[i], b = state.profiles[j];
         const value = Core.comparable(a, b) ? Core.cosine(a.metrics, b.metrics) : null;
         lines.push(a.name + ' / ' + b.name + ': ' +
-          (value === null ? '比較不可（欠測・条件不一致・条件不明・ゼロベクトル）' : value.toFixed(4)));
+          (value === null ? t('incomparable') : value.toFixed(4)));
       }
     }
     document.getElementById('comparison').textContent = lines.join('\n');
