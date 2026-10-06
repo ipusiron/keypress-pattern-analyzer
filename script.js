@@ -1267,6 +1267,10 @@
   }
 
   function renderLearning() {
+    const source = document.getElementById('visualSource');
+    source.hidden = !state.sampleId;
+    source.textContent = state.sampleId ? t('synthetic') : '';
+    document.querySelector('#analysisSection h2').textContent = state.sampleId ? t('sampleDetails') : t('headings')[5];
     document.querySelectorAll('[data-sample]').forEach(button => { button.disabled = state.running || importing; });
     document.getElementById('sampleExplanation').textContent = state.sampleId ?
       t('sample' + state.sampleId[0].toUpperCase() + state.sampleId.slice(1) + 'Note') : '';
@@ -1288,8 +1292,8 @@
       const select = document.getElementById(id);
       const previous = select.value;
       select.replaceChildren(new Option(t('chooseRecord'), ''));
-      state.profiles.forEach((p, i) => select.add(new Option(t('recorded') + ': ' + p.name, 'p:' + i)));
-      Learning.sampleIds.forEach(key => select.add(new Option(t('synthetic') + ': ' + sampleLabel(key), 's:' + key)));
+      state.profiles.forEach((p, i) => select.add(new Option(t('savedShort') + ': ' + p.name, 'p:' + i)));
+      Learning.sampleIds.forEach(key => select.add(new Option(t('sampleShort') + ': ' + sampleLabel(key), 's:' + key)));
       select.value = previous;
       if (select.selectedIndex < 0) select.value = '';
       select.disabled = state.running || importing;
@@ -1414,7 +1418,7 @@
     const zero = -min / span * 100;
     const chart = node('div', undefined, 'difference-chart');
     chart.setAttribute('aria-hidden', 'true'); // The adjacent table exposes the same numbers accessibly.
-    chart.append(node('p', t('chartScale') + ': ' + ms(min) + ' … 0 … ' + ms(max)));
+    chart.append(node('p', t('chartScale') + ': ' + ms(min) + ' … ' + ms(max)));
     for (const row of rows) {
       chart.append(node('h3', t(row.key)));
       for (const [label, value] of [['A', row.a], ['B', row.b]]) {

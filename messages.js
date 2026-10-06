@@ -2,6 +2,9 @@
 (function (root) {
   const messages = {
   "ja": {
+    "sampleDetails": "人工サンプルの解説（実測ではありません）",
+    "savedShort": "保存",
+    "sampleShort": "人工",
     "enabled": "有効",
     "disabled": "無効",
     "learningTitle": "学習サンプル",
@@ -178,6 +181,9 @@
     ]
   },
   "en": {
+    "sampleDetails": "Synthetic sample details (not a measurement)",
+    "savedShort": "Saved",
+    "sampleShort": "Synthetic",
     "enabled": "Enabled",
     "disabled": "Disabled",
     "learningTitle": "Learning samples",

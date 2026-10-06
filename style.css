@@ -906,9 +906,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 #comparison { white-space: normal; }
 .source-note { border-left: 4px solid var(--accent); padding-left: .75rem; font-weight: bold; }
 .comparison-table { overflow-x: auto; }
-.comparison-table table { width: 100%; min-width: 26rem; }
+.comparison-table table { width: 100%; min-width: 0; table-layout: fixed; }
 .comparison-table caption { text-align: left; padding: .75rem 0; }
-.comparison-table td { white-space: nowrap; }
+.comparison-table td, .comparison-table th { white-space: normal; padding: .5rem .25rem; font-size: .875rem; }
 .comparison-table th { text-align: left; }
 .difference-chart { margin-top: 1rem; }
 .difference-chart h3 { margin-bottom: .5rem; }

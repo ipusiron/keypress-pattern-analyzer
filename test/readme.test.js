@@ -3,10 +3,21 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const C = require('../logic.js');
+const L = require('../learning.js');
 const { createHash } = require('node:crypto');
 const files = ['README.md', 'README.en.md'];
 for (const file of files) {
   const text = fs.readFileSync(file, 'utf8');
+  test(file + ': learning means and signed differences match all four examples', () => {
+    const rows = [...text.matchAll(/^\| (normal|overlap|incomplete|doubled) \| (-?\d+) \| (-?\d+) \| (-?\d+|—) \| ([^|]+) \|$/gm)];
+    assert.equal(rows.length, 4);
+    for (const [, id, dwell, dd, ud, delta] of rows) {
+      const p = L.sample(id), r = L.comparison(L.sample('normal'), p);
+      const expected = x => x === '—' ? null : Number(x);
+      assert.deepEqual([p.metrics.avgDwell, p.metrics.avgDD, p.metrics.avgFlight], [dwell, dd, ud].map(expected));
+      assert.deepEqual(r.rows.map(x => x.delta), delta.split(' / ').map(expected));
+    }
+  });
   test(file + ': four timing examples execute exactly', () => {
     const rows = [...text.matchAll(/^\| (sequential|overlap|single|incomplete) \| (.+) \| (.+) \| (.+) \| (.+) \| (\d+) \|$/gm)];
     assert.equal(rows.length, 4);
@@ -57,7 +68,8 @@ test('metadata structure and identity are preserved', () => {
   for (const key of ['category_ja', 'category_en', 'tags']) assert.match(current, new RegExp(key + ':\\r?\\n  - '));
 });
 test('directory tree describes every tracked/source file', () => {
-  const expected = ['index.html', 'script.js', 'logic.js', 'messages.js', 'theme-init.js', 'style.css', 'package.json',
+  const expected = ['index.html', 'script.js', 'logic.js', 'learning.js', 'learning.test.js', 'messages.js',
+    'theme-init.js', 'style.css', 'package.json',
     'logic.test.js', 'ui.test.js', 'readme.test.js', 'format.test.js', 'test.yml', 'README.md', 'README.en.md',
     'ALGORITHMS.md', 'TECHNICAL.md', 'CLAUDE.md', 'LICENSE', '.gitignore', '.nojekyll'];
   for (const file of files) {

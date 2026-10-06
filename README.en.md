@@ -21,13 +21,17 @@ This static web app computes on your device. It has no code that transmits input
 
 ## 📸 Screenshots
 
-> ![English capture screen](assets/en/screenshot.png)
+> ![English settings and learning samples](assets/en/screenshot.png)
 >
-> *English capture screen in the light theme.*
+> *English settings and learning samples in the light theme.*
 
 > ![Measurement details](assets/en/screenshot2.png)
 >
 > *English measurements and limitations in the dark theme.*
+
+> ![Difference comparison of two synthetic samples](assets/en/screenshot3.png)
+>
+> *Sequential input and double timing: a similarity of 1 does not mean equal timings.*
 
 ## 📖 Usage
 
@@ -37,6 +41,11 @@ This static web app computes on your device. It has no code that transmits input
 4. Click Stop. Leaving the input area or window, or hiding the page, also stops capture.
 5. Read the summary, charts, key-pair table and measurement details.
 6. Save only the recordings you need as profiles and export them as JSON.
+7. Select two different records A and B in the comparison section. If comparison is unavailable, check the stated reasons.
+
+To explore without typing, choose a learning sample: sequential input, overlapping keys, missing release or double timing.
+Synthetic samples are explicitly distinguished from measurements and are not added to saved profiles or JSON.
+Replacing the current measurement requires confirmation. Saved profiles are kept.
 
 Mode and IME settings are locked during capture.
 Starting again clears the current recording and results, but keeps saved profiles.
@@ -53,7 +62,10 @@ Theme precedence is saved choice, then OS preference. Switching still works when
 - Rhythm: show DD between adjacent presses in the same segment, without smoothing or ability ratings.
 - Heatmap: show counts by key value on a schematic layout. Up to 14 extra keys are drawn; the text list below contains counts for all keys.
 - Digraph table: show up to 10 adjacent key pairs, sorted by frequency, with separate DD and UD sample counts.
-- Profiles: save, import/export JSON, compare eligible recordings and delete all saved profiles.
+- Input conditions: show target-phrase matching, reported input operations, IME use and missing observations.
+- Learning samples: explore four synthetic examples using the same calculations and charts.
+- Comparison: show selected records' mean Dwell, DD and UD and differences B minus A in ms, with shared-axis bars and sample counts.
+- Profiles: list saved records, import JSON, export all records, and delete individual or all profiles.
 
 Charts scroll horizontally on narrow screens.
 Results are calculated when capture stops; language and theme changes keep the same recording.
@@ -85,8 +97,24 @@ Editing, paste and IMEs can make character and event counts differ, so WPM is no
 
 Comparison uses cosine similarity of `[mean Dwell, mean UD, mean DD]`.
 The value is not an identity probability: doubling every timing still gives 1.
-Comparison is unavailable for missing observations, interrupted segments, IME use, unequal modes/target phrases/typed text, unknown conditions, unavailable metrics or zero vectors.
+Mean Dwell, DD and UD also show differences B minus A in ms. A positive difference means B is larger, not better or worse.
+
+| Learning ID | Mean Dwell (ms) | Mean DD (ms) | Mean UD (ms) | Difference from sequential Dwell / DD / UD (ms) |
+|---|---:|---:|---:|---|
+| normal | 80 | 120 | 40 | 0 / 0 / 0 |
+| overlap | 100 | 60 | -40 | 20 / -60 / -80 |
+| incomplete | 40 | 60 | — | — / — / — |
+| doubled | 160 | 240 | 80 | 80 / 120 / 40 |
+
+Compare two saved records or two synthetic samples; do not mix the two sources.
+Missing observations, interruptions, IME use, missing input-type information, paste, drop, replacement, editing or unknown input operations block comparison.
+Fixed and custom modes require an exact match with the target phrase. Mode, target phrase, IME exclusion setting, final text and ordered key-press sequence must also match.
+Unknown key codes, unavailable metrics and zero vectors are also excluded. Reasons are shown separately for A and B.
+When conditions are not met, only individual means are shown; differences, similarity and comparison bars are withheld.
 Also match conditions that are not recorded automatically, such as equipment and browser.
+
+Input types describe operations reported by the browser. The app examines notifications such as `inputType`, but cannot detect every input source.
+Neither input notifications nor JSON values prove physical typing or authenticity. [W3C Input Events (Working Draft)](https://www.w3.org/TR/input-events-2/)
 
 No authenticator, authentication error-rate evaluation or impersonation-resistance test is implemented.
 The tool cannot determine force, fatigue or identity, and cannot serve as identity verification or proof.
@@ -94,10 +122,12 @@ Within its scope, NIST SP 800-63B-4 places conditions on biometric authenticatio
 
 ## 💾 Storage and JSON
 
-Profiles contain a name, date, typed text, key sequence, relative timings and input settings.
+Profiles contain a name, date, typed text, key sequence, relative timings, input settings and observed input-type flags.
 They are neither encrypted nor anonymized. Take care on shared devices and when sharing JSON.
 Saved profiles survive reloads; Clear this recording does not delete them.
 Delete all saved profiles removes browser profiles, not downloaded JSON or data on another device.
+Delete this record removes one selected profile after confirmation. If updating storage fails, the in-page record is also retained.
+Individual deletion clears the comparison selections. List previews show up to 80 UTF-16 code units each for final text and target phrase; JSON contains the full text.
 
 | Limit | Maximum |
 |---|---:|
@@ -112,6 +142,8 @@ All profiles are validated before import. Invalid values or excess counts cause 
 The same size limit applies to JSON containing all saved profiles together.
 Metrics are recomputed from events; precomputed metrics in JSON are not trusted.
 Formats without recorded input conditions are marked as unknown and cannot be compared.
+Version 2 JSON stores the booleans `observed`, `paste`, `drop`, `replacement`, `edit` and `unknown` in `context.input`.
+JSON without this information can still be imported, but is excluded from difference comparison because input types are unknown. Missing flags are not filled in to make a record eligible.
 
 Storage failure messages distinguish in-page data from persistent storage.
 Export JSON before closing the page. Browser storage capacity depends on the environment.
@@ -147,7 +179,7 @@ GitHub Pages meta tags cannot set frame-ancestors or X-Frame-Options, so embeddi
 
 - No recording: check that capture started, the input area has focus, and whether an IME is active.
 - “—” is shown: there are no samples for that metric. One key does not form a DD or UD pair.
-- Comparison unavailable: check text/settings equality, missing observations and IME use.
+- Comparison unavailable: check the reasons for A and B. If input types are unknown, make a new recording under matching conditions.
 - Cannot save: export JSON and check browser storage permissions and capacity.
 - Import rejected: check JSON size and structure. Preserve the source data rather than forcing values to fit.
 - Extension errors: they may affect behavior; isolate the issue using another browser profile.
@@ -161,7 +193,7 @@ GitHub Pages meta tags cannot set frame-ancestors or X-Frame-Options, so embeddi
 ## 🧪 Tests
 
 Run `npm test` with Node.js 22 or later. No dependency installation is required.
-Tests cover known timing fixtures, overlaps, missing data, JSON validation, bilingual messages, README tables, HTML and colors.
+Tests cover known timing fixtures, overlaps, missing data, synthetic samples, differences and exclusion reasons, JSON validation, bilingual messages, README tables, HTML and colors.
 GitHub Actions runs the same tests on push and pull_request.
 
 ## 📁 Directory structure
@@ -176,12 +208,14 @@ keypress-pattern-analyzer/          # Project root
 ├── index.html                      # Page structure and CSP
 ├── script.js                       # Capture and UI behavior
 ├── logic.js                        # Timing and JSON validation
+├── learning.js                     # Synthetic samples, input conditions and differences
 ├── messages.js                     # Japanese and English messages
 ├── theme-init.js                   # Pre-paint theme initialization
 ├── style.css                       # Colors and layout
 ├── package.json                    # Dependency-free test command
 ├── test/                           # Regression tests
 │   ├── logic.test.js               # Known answers and boundaries
+│   ├── learning.test.js            # Synthetic examples and comparison conditions
 │   ├── ui.test.js                  # Messages, safety and colors
 │   ├── readme.test.js              # Bilingual README checks
 │   └── format.test.js              # Readable-format checks
@@ -194,9 +228,11 @@ keypress-pattern-analyzer/          # Project root
 └── assets/                         # Screenshots
     ├── screenshot.png              # Japanese capture screen
     ├── screenshot2.png             # Japanese results screen
+    ├── screenshot3.png             # Japanese synthetic comparison
     └── en/                         # English screenshots
         ├── screenshot.png          # English capture screen
-        └── screenshot2.png         # English results screen
+        ├── screenshot2.png         # English results screen
+        └── screenshot3.png         # English synthetic comparison
 ```
 
 

@@ -59,3 +59,31 @@ test('optional input observations round-trip; absent legacy observations remain 
   raw.context.input = { ...L.newInput(), observed: 'true' };
   assert.throws(() => C.validateProfiles([raw]));
 });
+
+for (const [field, value] of [['mode', 'free'], ['phrase', 'ac'], ['ignoreIME', false]]) {
+  test(field + ': comparison gives the specific mismatch reason', () => {
+    const a = L.sample('normal'), b = L.sample('normal'); b.context[field] = value;
+    assert.ok(L.comparison(a, b).reasons.some(x => x.reason === field + 'Mismatch'));
+  });
+}
+test('text mismatch, interruptions, missing context and zero vectors exclude comparison', () => {
+  const a = L.sample('normal'), b = L.sample('normal'); b.text = 'ac';
+  assert.ok(L.comparison(a, b).reasons.some(x => x.reason === 'textMismatch'));
+  b.context = null;
+  b.metrics.interruptions = 1;
+  b.metrics.avgDwell = b.metrics.avgDD = b.metrics.avgFlight = 0;
+  assert.deepEqual(L.issues(b), ['contextUnknown', 'interrupted', 'zeroVector']);
+  assert.equal(L.comparison(a, b).cosine, null);
+});
+test('every observed input flag must be a boolean; unknown fields cannot become executable data', () => {
+  for (const key of Object.keys(L.newInput())) {
+    const p = { ...L.sample('normal'), version: 2, name: 'test', timestamp: 1 };
+    p.context.input[key] = 1;
+    assert.throws(() => C.validateProfiles([p]));
+  }
+  const p = { ...L.sample('normal'), version: 2, name: 'test', timestamp: 1 };
+  p.context.input.extra = '<script>alert(1)</script>';
+  assert.equal(C.validateProfiles([p])[0].context.input.extra, undefined);
+  delete p.context.input;
+  assert.equal(C.validateProfiles([p])[0].context.input, undefined);
+});
