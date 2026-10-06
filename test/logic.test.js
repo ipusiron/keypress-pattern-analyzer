@@ -95,3 +95,16 @@ test('comparison requires equal recorded conditions; legacy is unknown', () => {
   assert.equal(legacy.context, null);
   assert.equal(C.comparable(a, legacy), false);
 });
+
+test('combined export stays importable; rejection is atomic', () => {
+  const p = C.validateProfiles([fixture()])[0];
+  const existing = [p];
+  assert.equal(C.mergeProfiles(existing, [p]).length, 2);
+  assert.equal(existing.length, 1);
+  assert.throws(() => C.mergeProfiles(Array(50).fill(p), [p]));
+  const large = fixture();
+  large.events = Array.from({ length: 10000 }, (_, i) => ev(i % 2 ? 'up' : 'down', 'A', i));
+  const validated = C.validateProfiles([large])[0];
+  assert.throws(() => C.mergeProfiles(Array(10).fill(validated), [validated]));
+  assert.equal(existing.length, 1);
+});

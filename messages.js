@@ -54,7 +54,9 @@
     "incomparable": "比較不可（欠測・条件不一致・条件不明・ゼロベクトル）",
     "beginPlaceholder": "開始を押してから入力してください",
     "typePlaceholder": "ここに入力してください",
-    "interpretation": "UDは次のキーの押下−前のキーの解放です。負の値は押下の重なりを示します。\n標準偏差はこの記録内のばらつきで、本人固有性や能力を表しません。「—」は試料なし、0 msとは異なります。\nWPMは最終入力のUnicodeコードポイント数÷5÷記録時間（分）です。最初の押下から最後の記録イベントまでを使います。訂正・貼り付け・IMEは値に影響します。\n本人確認・なりすまし耐性・押す力・疲労は判定できません。機器・ブラウザー・入力方式・練習の影響を受けます。物理キーの時間精度は保証しません。",
+    "interpretation": "UDは次のキーの押下−前のキーの解放です。負の値は押下の重なりを示します。\n標準偏差はこの記録内のばらつきで、本人固有性や能力を表しません。「—」は試料なし、0 msとは異なります。\nWPMは最終入力" +
+      "のUnicodeコードポイント数÷5÷記録時間（分）です。最初の押下から最後の記録イベントまでを使います。訂正・貼り付け・IMEは値に影響します。\n本人確認・なりすまし耐性・押す力・疲労は判定できませ" +
+      "ん。機器・ブラウザー・入力方式・練習の影響を受けます。物理キーの時間精度は保証しません。",
     "headings": [
       "モードと設定",
       "記録",
@@ -132,7 +134,8 @@
     "delete": "Delete all saved profiles",
     "input": "Input area",
     "captureNote": "Type after starting. Leaving the input area stops capture; unreleased keys are marked as missing.",
-    "privacy": "Saving keeps the name, date, typed text, key sequence, relative timings and settings in this browser and in exported JSON. Clearing a recording does not delete saved profiles.",
+    "privacy": "Saving keeps the name, date, typed text, key sequence, relative timings and settings in this browser" +
+      " and in exported JSON. Clearing a recording does not delete saved profiles.",
     "help": "Help",
     "close": "Close",
     "theme": "Toggle theme",
@@ -161,11 +164,17 @@
     "imported": "Validated profiles imported and saved.",
     "importUnsaved": "Import completed but persistent storage failed. Export JSON to keep the data.",
     "invalidImport": "Import rejected. Check the JSON structure, values and profile count. Existing data is unchanged.",
-    "cosineNote": "Cosine similarity is not an identity probability. Doubling every timing still gives 1. Check equipment and input-method conditions yourself.",
+    "cosineNote": "Cosine similarity is not an identity probability. Doubling every timing still gives 1. Check equipme" +
+      "nt and input-method conditions yourself.",
     "incomparable": "Not comparable (missing data, unequal/unknown conditions, or a zero vector)",
     "beginPlaceholder": "Click Start before typing",
     "typePlaceholder": "Type here…",
-    "interpretation": "UD is the next key press minus the preceding key release. Negative values indicate overlapping presses.\nStandard deviation describes variation in this recording, not uniqueness or ability. “—” means no samples, not 0 ms.\nWPM is the final Unicode code-point count / 5 / recording minutes, from the first press to the last recorded event. Editing, paste and IME input affect it.\nThis tool cannot assess identity, impersonation resistance, force or fatigue. Equipment, browsers, input methods and practice affect the values. Physical-key timing accuracy is not guaranteed.",
+    "interpretation": "UD is the next key press minus the preceding key release. Negative values indicate overlapping press" +
+      "es.\nStandard deviation describes variation in this recording, not uniqueness or ability. “—” means n" +
+      "o samples, not 0 ms.\nWPM is the final Unicode code-point count / 5 / recording minutes, from the fir" +
+      "st press to the last recorded event. Editing, paste and IME input affect it.\nThis tool cannot assess" +
+      " identity, impersonation resistance, force or fatigue. Equipment, browsers, input methods and practi" +
+      "ce affect the values. Physical-key timing accuracy is not guaranteed.",
     "headings": [
       "Mode & settings",
       "Capture",

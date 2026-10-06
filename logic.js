@@ -115,7 +115,15 @@
       a.context.ignoreIME === b.context.ignoreIME && a.text === b.text &&
       !a.metrics.incomplete && !b.metrics.incomplete && !a.metrics.interruptions && !b.metrics.interruptions);
   }
-  const api = { LIMITS, mean, deviation, wpm, analyze, cosine, validateProfiles, parseProfiles, exportProfiles, comparable };
+  function mergeProfiles(existing, incoming) {
+    const combined = [...existing, ...incoming];
+    if (combined.length > LIMITS.profiles || new TextEncoder().encode(exportProfiles(combined)).length > LIMITS.bytes) {
+      throw new Error('invalidProfiles');
+    }
+    return combined;
+  }
+  const api = { LIMITS, mean, deviation, wpm, analyze, cosine, validateProfiles,
+    parseProfiles, exportProfiles, comparable, mergeProfiles };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.KeystrokeCore = Object.freeze(api);
 })(globalThis);

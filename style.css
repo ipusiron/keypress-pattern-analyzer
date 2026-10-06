@@ -46,7 +46,8 @@
 }
 
 *{ box-sizing: border-box; }
-html,body{ height:100%; }
+html { min-height: 100%; }
+body { min-height: 100vh; min-height: 100dvh; }
 body{
   margin:0;
   font-family: ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Apple Color Emoji,Segoe UI Emoji,Arial,sans-serif;
@@ -56,7 +57,7 @@ body{
 }
 
 /* Dark mode gradient background */
-body:not(.light-mode) {
+:root:not(.light-mode) body {
   background:radial-gradient(60rem 60rem at 120% -20%, #1b2442 10%, transparent 60%),
              radial-gradient(50rem 40rem at -20% 0%, #13203a 10%, transparent 60%),
              var(--bg);

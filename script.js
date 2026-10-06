@@ -7,8 +7,13 @@
 
 (function () {
   const Core = window.KeystrokeCore;
-  let language = 'ja';
-  try { if (localStorage.getItem('language') === 'en') language = 'en'; } catch { /* Optional. */ }
+  let language = navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+  try {
+    const saved = localStorage.getItem('language');
+    if (saved === 'ja' || saved === 'en') language = saved;
+  } catch { /* Optional. */ }
+  const requestedLanguage = new URLSearchParams(location.search).get('lang');
+  if (requestedLanguage === 'ja' || requestedLanguage === 'en') language = requestedLanguage;
   let statusKey = '';
   const t = key => window.KeystrokeMessages[language][key];
   let captureTimer = null;
@@ -1101,9 +1106,9 @@
 
   function clearVisualizations() {
     // Clear visualization boxes (headers and help icons are now outside in HTML)
-    els.viz.timeline.innerHTML = '';
-    els.viz.rhythm.innerHTML = '';
-    els.viz.heatmap.innerHTML = '';
+    els.viz.timeline.replaceChildren();
+    els.viz.rhythm.replaceChildren();
+    els.viz.heatmap.replaceChildren();
     
     // Clear digraph table
     const tbody = document.querySelector('table tbody');
@@ -1140,7 +1145,8 @@
     try {
       const profile = Core.validateProfiles([{ version: 2, name, timestamp: Date.now(),
         text: els.editor.value, events: state.events, context: state.context }])[0];
-      state.profiles.push(profile);
+      state.profiles = Core.mergeProfiles(state.profiles, [profile]);
+      document.getElementById('comparison').textContent = '';
       notify(saveProfiles() ? 'saved' :
         'saveFailed');
       updateUI();
@@ -1210,8 +1216,7 @@
     updateUI();
     try {
       const profiles = Core.parseProfiles(await file.text());
-      if (state.profiles.length + profiles.length > Core.LIMITS.profiles) throw new Error('count');
-      state.profiles = [...state.profiles, ...profiles];
+      state.profiles = Core.mergeProfiles(state.profiles, profiles);
       document.getElementById('comparison').textContent = '';
       notify(saveProfiles() ? 'imported' :
         'importUnsaved');
