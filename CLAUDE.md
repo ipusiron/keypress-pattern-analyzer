@@ -22,6 +22,9 @@ Pure frontend application (no build process, no dependencies):
 - **Metrics Calculation**: `calculateMetrics()` computes dwell times, flight times, DD/UD intervals, WPM
 - **Visualizations**: Three Canvas-based renderers (`renderTimeline`, `renderRhythm`, `renderHeatmap`) with theme-aware colors via `getThemeColors()`
 - **Core**: logic.js provides DOM-independent timing, validation and cosine comparison; CommonJS tests and classic browser scripts support file URLs.
+- **Learning**: learning.js provides four synthetic samples, input-condition reasons and signed B-minus-A timing differences.
+- **Comparison**: choose two saved records or two synthetic samples. Do not mix sources; unknown input observations block differences.
+- **Profiles**: per-record deletion commits memory only after storage succeeds. Deletion clears comparison selections.
 - **Messages**: messages.js contains Japanese and English UI text. Re-render derived content on language changes.
 - **Results**: descriptive statistics and limitations only; no authentication suitability ratings.
 
@@ -46,7 +49,7 @@ No build step required. Open `index.html` directly in browser or serve via any s
 # Using Python
 python -m http.server 8000
 
-# Using Node.js (npx)
+# Tests with Node.js
 npm test
 ```
 
@@ -58,6 +61,9 @@ GitHub Pages deploys the main branch root. The `.nojekyll` file disables Jekyll 
 - Event limit of 10,000 events (down, up and break combined) to prevent memory exhaustion
 - Input sanitization: key codes limited to 50 chars, key values to 50 chars
 - Profile names limited to 50 UTF-16 code units, max 50 profiles; raw text and events are saved without anonymization
+- Optional context.input flags in version 2: observed, paste, drop, replacement, edit, unknown (all booleans).
+- Absent input observations stay unknown on import. Browser notifications and imported flags do not prove physical typing or authenticity.
+- Synthetic samples never enter saved profiles or JSON. Replacing a current measurement with a sample requires confirmation.
 - Canvas visualizations use configurable sizing via CSS custom properties (`--viz-*`)
 - Help buttons open a native dialog with keyboard and touch support
 

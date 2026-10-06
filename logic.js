@@ -92,6 +92,11 @@
         if (!c || !['fixed', 'custom', 'free'].includes(c.mode) || typeof c.ignoreIME !== 'boolean') fail();
         if (typeof c.phrase !== 'string' || c.phrase.length > LIMITS.text || typeof c.imeUsed !== 'boolean') fail();
         context = { mode: c.mode, phrase: c.phrase, ignoreIME: c.ignoreIME, imeUsed: c.imeUsed };
+        if (c.input != null) {
+          const fields = ['observed', 'paste', 'drop', 'replacement', 'edit', 'unknown'];
+          if (typeof c.input !== 'object' || fields.some(key => typeof c.input[key] !== 'boolean')) fail();
+          context.input = Object.fromEntries(fields.map(key => [key, c.input[key]]));
+        }
       }
       const metrics = analyze(events, profile.text);
       if (!metrics.totalKeys) fail();

@@ -20,12 +20,29 @@ test('CSP, external classic scripts and accessible controls', () => {
   assert.match(html, /name="referrer"/);
   assert.doesNotMatch(html, /frame-ancestors|unsafe-inline|unsafe-eval|http-equiv="X-Frame/);
   assert.doesNotMatch(html, /\sstyle=|\son\w+=|type="module"/);
-  for (const file of ['logic.js', 'messages.js', 'theme-init.js', 'script.js']) assert.ok(html.includes(file));
+  for (const file of ['logic.js', 'learning.js', 'messages.js', 'theme-init.js', 'script.js']) assert.ok(html.includes(file));
   for (const id of ['status', 'helpDialog', 'languageToggle', 'btnDelete', 'comparison']) {
     assert.equal(html.split('id="' + id + '"').length - 1, 1);
   }
   assert.match(html, /role="status"/);
   assert.doesNotMatch(js, /console\.log|eval\(/);
+});
+test('learning labels, dynamic reasons and data attributes are bilingual', () => {
+  const L = require('../learning.js');
+  const reasons = ['contextUnknown', 'inputUnknown', 'paste', 'drop', 'replacement', 'edit', 'unknown',
+    'imeUsed', 'targetMismatch', 'incomplete', 'interrupted', 'insufficient', 'zeroVector', 'unknownKey',
+    'modeMismatch', 'phraseMismatch', 'ignoreIMEMismatch', 'textMismatch', 'sourceMismatch', 'sequenceMismatch'];
+  for (const lang of ['ja', 'en']) {
+    for (const reason of reasons) assert.ok(M[lang]['reason' + reason[0].toUpperCase() + reason.slice(1)]);
+    for (const id of L.sampleIds) {
+      const key = 'sample' + id[0].toUpperCase() + id.slice(1);
+      assert.ok(M[lang][key] && M[lang][key + 'Note']);
+    }
+    for (const [, key] of html.matchAll(/data-i18n="([^"]+)"/g)) assert.ok(M[lang][key], key);
+  }
+  assert.equal((html.match(/data-sample=/g) || []).length, 4);
+  for (const id of ['compareA', 'compareB']) assert.match(html, new RegExp('label for="' + id + '"'));
+  assert.doesNotMatch(js, /innerHTML|insertAdjacentHTML/);
 });
 test('authentication scoring is not part of the result engine', () => {
   assert.doesNotMatch(js, /generateDetailedSummary|benchmarks|securityScore|typingStyle/);
