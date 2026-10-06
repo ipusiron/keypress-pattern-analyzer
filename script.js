@@ -7,6 +7,7 @@
 
 (function () {
   const Core = window.KeystrokeCore;
+  const Learning = window.KeystrokeLearning;
   let language = navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en';
   try {
     const saved = localStorage.getItem('language');
@@ -58,6 +59,7 @@
     profiles: [], // Saved profiles
     currentProfile: null,
     context: null,
+    sampleId: null,
     keyStates: new Map(), // Track key press states
     digraphs: new Map(), // Track digraph timings
   };
@@ -252,10 +254,12 @@
       'label[for=editor]': 'input', '#captureNote': 'captureNote', '#privacyNote': 'privacy',
       '#helpTitle': 'help', '#helpClose': 'close', '.analysis-summary h3': 'reading'
     })) set(selector, key);
+    document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+    document.getElementById('profileList').setAttribute('aria-label', t('savedList'));
     for (const [selector, key] of [
       ['main .section-header h2', 'headings'], ['.stat__label', 'stats'],
       ['.analysis-card h3', 'cards'], ['.metric-label', 'labels'], ['.viz-header h3', 'viz'],
-      ['thead th', 'columns']
+      ['#digraphTable thead th', 'columns']
     ]) document.querySelectorAll(selector).forEach((el, i) => { el.textContent = t(key)[i]; });
     document.querySelectorAll('.help-button').forEach((button, i) => {
       button.setAttribute('aria-label', t('help'));
@@ -271,7 +275,7 @@
     renderDigraphTable();
     if (state.metrics.totalKeys) { performAnalysis(); renderVisualizations(); }
     else { hideAnalysis(); clearVisualizations(); }
-    if (document.getElementById('comparison').textContent) compareProfiles();
+    renderLearning();
   }
 
   function initTooltips() {
@@ -321,6 +325,10 @@
     els.btnExport.addEventListener('click', exportJSON);
     els.btnImport.addEventListener('click', importJSON);
     els.btnCompare.addEventListener('click', compareProfiles);
+    for (const id of ['compareA', 'compareB']) document.getElementById(id).addEventListener('change', compareProfiles);
+    document.querySelectorAll('[data-sample]').forEach(button => {
+      button.addEventListener('click', () => loadSample(button.dataset.sample));
+    });
     
     els.editor.addEventListener('keydown', handleKeyDown);
     els.editor.addEventListener('keyup', handleKeyUp);
@@ -331,7 +339,20 @@
     });
     els.editor.addEventListener('compositionstart', () => { composing = true; compositionBoundary(); });
     els.editor.addEventListener('compositionend', () => { composing = false; compositionBoundary(); });
-    els.editor.addEventListener('input', () => {
+    els.editor.addEventListener('beforeinput', e => {
+      if (state.running && e.inputType === 'insertText' && els.editor.selectionStart < els.editor.value.length) {
+        state.context.input.edit = true;
+      }
+    });
+    for (const type of ['paste', 'drop']) els.editor.addEventListener(type, () => {
+      if (state.running) state.context.input[type] = true;
+    });
+    els.editor.addEventListener('input', e => {
+      if (!state.running) return;
+      state.context.input.observed = true;
+      const kind = Learning.inputKind(e.inputType || '');
+      if (kind) state.context.input[kind] = true;
+      if (e.isComposing || e.inputType === 'insertCompositionText') state.context.imeUsed = true;
       if (els.editor.value.length > Core.LIMITS.text) {
         els.editor.value = els.editor.value.slice(0, Core.LIMITS.text);
         stopCapture('textLimit');
@@ -373,7 +394,7 @@
     state.running = true;
     state.startedAt = performance.now();
     state.context = { mode: els.mode.value, phrase: els.phrase.value,
-      ignoreIME: els.imeToggle.checked, imeUsed: false };
+      ignoreIME: els.imeToggle.checked, imeUsed: false, input: Learning.newInput() };
     updateUI();
     els.editor.focus();
     notify('recording');
@@ -397,6 +418,8 @@
     clearTimeout(captureTimer);
     state.running = false;
     state.events = [];
+    state.context = null;
+    state.sampleId = null;
     state.metrics = {};
     state.keyStates.clear();
     state.digraphs.clear();
@@ -492,10 +515,9 @@
     els.mode.disabled = state.running;
     els.imeToggle.disabled = state.running;
     els.phrase.disabled = state.running || els.mode.value !== 'custom';
-    els.btnSave.disabled = state.running || importing || !state.metrics.totalKeys;
+    els.btnSave.disabled = state.running || importing || !state.metrics.totalKeys || Boolean(state.sampleId);
     els.btnExport.disabled = state.profiles.length === 0;
     els.btnImport.disabled = state.running || importing;
-    els.btnCompare.disabled = state.running || state.profiles.length < 2;
     document.getElementById('btnDelete').disabled = state.running || importing;
     const values = document.querySelectorAll('.grid.three .stat__value');
     const m = state.metrics;
@@ -504,6 +526,7 @@
     values[2].textContent = m.totalKeys ? ms(m.avgDwell) + ' / ' + ms(m.avgDD) : '—';
     document.getElementById('profileCount').textContent = state.profiles.length + ' / 50';
     els.editor.placeholder = state.running ? t('typePlaceholder') : t('beginPlaceholder');
+    renderLearning();
   }
 
   function renderVisualizations() {
@@ -1111,7 +1134,7 @@
     els.viz.heatmap.replaceChildren();
     
     // Clear digraph table
-    const tbody = document.querySelector('table tbody');
+    const tbody = document.querySelector('#digraphTable tbody');
     renderDigraphTable();
     
     // Show empty keyboard layout
@@ -1135,7 +1158,7 @@
   }
 
   function saveProfile() {
-    if (state.running || importing || !state.metrics.totalKeys) return;
+    if (state.running || importing || !state.metrics.totalKeys || state.sampleId) return;
     if (state.profiles.length >= Core.LIMITS.profiles) {
       notify('profileLimit');
       return;
@@ -1228,18 +1251,184 @@
     }
   }
 
+  function node(tag, text, className) {
+    const el = document.createElement(tag);
+    if (text !== undefined) el.textContent = text;
+    if (className) el.className = className;
+    return el;
+  }
+
+  function sampleLabel(id) {
+    return t('sample' + id[0].toUpperCase() + id.slice(1));
+  }
+
+  function currentRecord() {
+    return { text: els.editor.value, context: state.context, metrics: state.metrics, sampleId: state.sampleId };
+  }
+
+  function renderLearning() {
+    document.querySelectorAll('[data-sample]').forEach(button => { button.disabled = state.running || importing; });
+    document.getElementById('sampleExplanation').textContent = state.sampleId ?
+      t('sample' + state.sampleId[0].toUpperCase() + state.sampleId.slice(1) + 'Note') : '';
+    const panel = document.getElementById('qualityPanel');
+    panel.hidden = state.running || !state.context;
+    const reasons = document.getElementById('qualityReasons');
+    reasons.replaceChildren();
+    document.getElementById('recordSource').textContent = '';
+    document.getElementById('targetStatus').textContent = '';
+    if (!panel.hidden) {
+      document.getElementById('recordSource').textContent = state.sampleId ? t('synthetic') : t('recorded');
+      document.getElementById('targetStatus').textContent = state.context.mode === 'free' ? t('noTarget') :
+        state.context.phrase === els.editor.value ? t('targetMatch') : t('reasonTargetMismatch');
+      for (const reason of Learning.issues(currentRecord())) reasons.append(node('li', reasonText(reason)));
+      if (!reasons.childElementCount) reasons.append(node('li', t('noIssues')));
+    }
+    renderProfileList();
+    for (const id of ['compareA', 'compareB']) {
+      const select = document.getElementById(id);
+      const previous = select.value;
+      select.replaceChildren(new Option(t('chooseRecord'), ''));
+      state.profiles.forEach((p, i) => select.add(new Option(t('recorded') + ': ' + p.name, 'p:' + i)));
+      Learning.sampleIds.forEach(key => select.add(new Option(t('synthetic') + ': ' + sampleLabel(key), 's:' + key)));
+      select.value = previous;
+      if (select.selectedIndex < 0) select.value = '';
+      select.disabled = state.running || importing;
+    }
+    compareProfiles();
+  }
+
+  function reasonText(reason) {
+    return t('reason' + reason[0].toUpperCase() + reason.slice(1));
+  }
+
+  function loadSample(id) {
+    if (state.running || importing) return;
+    if (state.events.length && !state.sampleId && !confirm(t('replaceRecord'))) return;
+    const p = Learning.sample(id);
+    clearAll();
+    state.sampleId = id;
+    state.events = p.events;
+    state.context = p.context;
+    els.editor.value = p.text;
+    calculateMetrics();
+    updateUI();
+    renderVisualizations();
+    renderDigraphTable();
+    performAnalysis();
+    document.getElementById('compareA').value = 's:normal';
+    document.getElementById('compareB').value = 's:' + (id === 'normal' ? 'doubled' : id);
+    compareProfiles();
+    notify('sampleLoaded');
+  }
+
+  function renderProfileList() {
+    const list = document.getElementById('profileList');
+    list.replaceChildren();
+    if (!state.profiles.length) list.append(node('p', t('noProfiles')));
+    state.profiles.forEach((p, i) => {
+      const item = node('article', undefined, 'profile-item');
+      item.append(node('h3', p.name));
+      const date = new Date(p.timestamp);
+      item.append(node('p', Number.isFinite(date.getTime()) ? date.toLocaleString(language === 'ja' ? 'ja-JP' : 'en-US') : t('unknownDate')));
+      item.append(node('p', t('input') + ': ' + p.text.slice(0, 80) + (p.text.length > 80 ? '…' : '')));
+      if (p.context) {
+        item.append(node('p', t('mode') + ': ' + t(p.context.mode) + ' / ' + t('ime') + ': ' +
+          t(p.context.ignoreIME ? 'enabled' : 'disabled'), 'small'));
+        if (p.context.mode !== 'free') item.append(node('p', t('phrase') + ': ' + p.context.phrase.slice(0, 80) +
+          (p.context.phrase.length > 80 ? '…' : ''), 'small'));
+      }
+      const problems = Learning.issues(p);
+      item.append(node('p', problems.length ? problems.map(reasonText).join(' / ') : t('noIssues'), 'small'));
+      const button = node('button', t('deleteOne'));
+      button.setAttribute('aria-label', t('deleteOne') + ': ' + p.name);
+      button.disabled = state.running || importing;
+      button.addEventListener('click', () => deleteProfile(i));
+      item.append(button);
+      list.append(item);
+    });
+  }
+
+  function deleteProfile(index) {
+    if (state.running || importing || !state.profiles[index]) return;
+    if (!confirm(t('deleteOneConfirm') + '\n' + state.profiles[index].name)) return;
+    const next = state.profiles.filter((_, i) => i !== index);
+    try {
+      // Commit memory only after persistence succeeds; a failed delete retains the selection and records.
+      localStorage.setItem('keystroke_profiles', Core.exportProfiles(next));
+      state.profiles = next;
+      for (const id of ['compareA', 'compareB']) document.getElementById(id).value = '';
+      notify('deleted');
+    } catch { notify('deleteFailed'); }
+    updateUI();
+    document.getElementById('profileList').focus();
+  }
+
+  function selectedRecord(value) {
+    if (value.startsWith('s:') && Learning.sampleIds.includes(value.slice(2))) return Learning.sample(value.slice(2));
+    if (/^p:\d+$/.test(value)) return state.profiles[Number(value.slice(2))];
+    return null;
+  }
+
   function compareProfiles() {
-    if (state.profiles.length < 2) return;
-    const lines = [t('cosineNote')];
-    for (let i = 0; i < state.profiles.length - 1; i++) {
-      for (let j = i + 1; j < state.profiles.length; j++) {
-        const a = state.profiles[i], b = state.profiles[j];
-        const value = Core.comparable(a, b) ? Core.cosine(a.metrics, b.metrics) : null;
-        lines.push(a.name + ' / ' + b.name + ': ' +
-          (value === null ? t('incomparable') : value.toFixed(4)));
+    const box = document.getElementById('comparison');
+    const av = document.getElementById('compareA').value;
+    const bv = document.getElementById('compareB').value;
+    const a = selectedRecord(av), b = selectedRecord(bv);
+    box.replaceChildren();
+    els.btnCompare.disabled = state.running || importing || !a || !b || av === bv;
+    if (state.running || importing) return;
+    if (!a || !b || av === bv) { box.append(node('p', t('chooseTwo'))); return; }
+    const result = Learning.comparison(a, b);
+    box.append(node('p', t('cosineNote')));
+    box.append(node('p', a.sampleId && b.sampleId ? t('synthetic') : t('unverifiedSource'), 'source-note'));
+    const reasons = node('ul');
+    for (const item of result.reasons) reasons.append(node('li', (item.side ? item.side + ': ' : '') + reasonText(item.reason)));
+    box.append(reasons);
+    box.append(node('p', result.allowed ? t('cosineValue') + ': ' + result.cosine.toFixed(4) : t('differenceBlocked')));
+    const wrapper = node('div', undefined, 'comparison-table');
+    const table = node('table');
+    table.append(node('caption', t('differenceCaption')));
+    const head = table.createTHead().insertRow();
+    for (const title of [t('metric'), 'A', 'B', t('delta')]) {
+      const th = node('th', title); th.scope = 'col'; head.append(th);
+    }
+    const body = table.createTBody();
+    for (const row of result.rows) {
+      const tr = body.insertRow();
+      const label = node('th', t(row.key)); label.scope = 'row'; tr.append(label);
+      for (const value of [row.a, row.b, row.delta]) tr.append(node('td', ms(value)));
+    }
+    wrapper.append(table); box.append(wrapper);
+    box.append(node('p', t('sampleCounts') + ' A: ' + counts(a) + ' / B: ' + counts(b), 'small'));
+    if (result.allowed) renderComparisonBars(box, result.rows);
+  }
+
+  function counts(p) {
+    return [p.metrics.dwellTimes.length, p.metrics.ddTimes.length, p.metrics.flightTimes.length].join(' / ');
+  }
+
+  function renderComparisonBars(box, rows) {
+    const values = rows.flatMap(row => [row.a, row.b]);
+    const min = Math.min(0, ...values), max = Math.max(0, ...values);
+    const span = max - min || 1;
+    const zero = -min / span * 100;
+    const chart = node('div', undefined, 'difference-chart');
+    chart.setAttribute('aria-hidden', 'true'); // The adjacent table exposes the same numbers accessibly.
+    chart.append(node('p', t('chartScale') + ': ' + ms(min) + ' … 0 … ' + ms(max)));
+    for (const row of rows) {
+      chart.append(node('h3', t(row.key)));
+      for (const [label, value] of [['A', row.a], ['B', row.b]]) {
+        const line = node('div', undefined, 'difference-line');
+        line.append(node('span', label + ': ' + ms(value)));
+        const track = node('div', undefined, 'difference-track');
+        const origin = node('span', undefined, 'difference-zero'); origin.style.left = zero + '%';
+        const bar = node('span', undefined, 'difference-bar bar-' + label.toLowerCase());
+        bar.style.left = (Math.min(0, value) - min) / span * 100 + '%';
+        bar.style.width = Math.abs(value) / span * 100 + '%';
+        track.append(bar, origin); line.append(track); chart.append(line);
       }
     }
-    document.getElementById('comparison').textContent = lines.join('\n');
+    box.append(chart);
   }
 
 

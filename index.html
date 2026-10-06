@@ -103,6 +103,18 @@
     </section>
 
     <!-- ====== 入力エリア ====== -->
+    <section class="card" aria-labelledby="learningHeading">
+      <h2 id="learningHeading" data-i18n="learningTitle">学習サンプル</h2>
+      <p data-i18n="learningNote">人工データです。実測とは区別し、保存しません。</p>
+      <div class="controls" id="sampleButtons">
+        <button data-sample="normal" data-i18n="sampleNormal">通常入力</button>
+        <button data-sample="overlap" data-i18n="sampleOverlap">重なり入力</button>
+        <button data-sample="incomplete" data-i18n="sampleIncomplete">解放の欠測</button>
+        <button data-sample="doubled" data-i18n="sampleDoubled">時間が2倍</button>
+      </div>
+      <p id="sampleExplanation"></p>
+    </section>
+
     <section class="card">
       <div class="section-header">
         <h2>Capture</h2>
@@ -125,6 +137,13 @@
       <p id="captureNote" class="muted small">
         ※ Startボタンをクリックしてキーストローク記録を開始してください。
       </p>
+      <div id="qualityPanel" class="note-box" hidden>
+        <h3 data-i18n="qualityTitle">入力条件と比較の注意</h3>
+        <p id="recordSource"></p>
+        <p id="targetStatus"></p>
+        <ul id="qualityReasons"></ul>
+        <p class="small" data-i18n="observationNote">入力種別はブラウザーの通知です。物理打鍵の証明ではありません。</p>
+      </div>
     </section>
 
     <!-- ====== 結果（プレースホルダー） ====== -->
@@ -195,7 +214,7 @@
         </span>
       </div>
       <div class="table-wrap">
-        <table>
+        <table id="digraphTable">
           <thead>
             <tr>
               <th>Digraph</th>
@@ -299,12 +318,22 @@
         <button id="btnSave" disabled data-tooltip="現在の記録をプロファイルとして保存">Save Profile</button>
         <button id="btnExport" disabled data-tooltip="全プロファイルをJSONファイルで出力">Export JSON</button>
         <button id="btnImport" disabled data-tooltip="JSONファイルからプロファイルを読み込み">Import JSON</button>
-        <button id="btnCompare" disabled data-tooltip="保存済みプロファイルの類似度を比較">Compare</button>
         <button id="btnDelete" disabled>保存プロファイルを全削除</button>
       </div>
-      <p id="comparison"></p>
       <p id="profileCount"></p>
+      <div id="profileList" class="profile-list" tabindex="-1" aria-label="保存一覧"></div>
       <p id="privacyNote" class="muted small">入力本文・キー列も保存されます。</p>
+    </section>
+
+    <section class="card" aria-labelledby="compareHeading">
+      <h2 id="compareHeading" data-i18n="compareTitle">2件の差分比較</h2>
+      <p data-i18n="compareNote">保存記録どうし、または人工サンプルどうしを選んで比較します。</p>
+      <div class="grid two">
+        <div><label for="compareA" data-i18n="selectA">記録A（基準）</label><select id="compareA"></select></div>
+        <div><label for="compareB" data-i18n="selectB">記録B</label><select id="compareB"></select></div>
+      </div>
+      <button id="btnCompare" disabled data-i18n="compare">比較</button>
+      <div id="comparison" aria-live="polite"></div>
     </section>
   </main>
 
@@ -325,6 +354,7 @@
 
   <script src="./messages.js" defer></script>
   <script src="./logic.js" defer></script>
+  <script src="./learning.js" defer></script>
   <script src="./script.js" defer></script>
 </body>
 </html>

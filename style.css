@@ -895,3 +895,28 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+/* Learning records and comparisons are stacked first; wide screens add columns. */
+.profile-list { display: grid; gap: 1rem; }
+.profile-item { min-width: 0; padding: 1rem; border: 1px solid var(--muted); border-radius: .5rem; overflow-wrap: anywhere; }
+.profile-item h3 { margin-top: 0; }
+#profileList:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+#qualityPanel, #sampleExplanation, #comparison { overflow-wrap: anywhere; }
+#qualityPanel { margin-top: 1rem; }
+#comparison { white-space: normal; }
+.source-note { border-left: 4px solid var(--accent); padding-left: .75rem; font-weight: bold; }
+.comparison-table { overflow-x: auto; }
+.comparison-table table { width: 100%; min-width: 26rem; }
+.comparison-table caption { text-align: left; padding: .75rem 0; }
+.comparison-table td { white-space: nowrap; }
+.comparison-table th { text-align: left; }
+.difference-chart { margin-top: 1rem; }
+.difference-chart h3 { margin-bottom: .5rem; }
+.difference-line { display: grid; grid-template-columns: minmax(7.5rem, auto) minmax(0, 1fr); gap: .75rem; margin: .5rem 0; }
+.difference-track { position: relative; height: 1.5rem; background: var(--bg); }
+.difference-bar { position: absolute; height: 100%; min-width: 1px; background: var(--accent); }
+.bar-b { background: var(--muted); border: 2px solid var(--text); }
+.difference-zero { position: absolute; height: 100%; border-left: 2px solid var(--text); }
+@media (min-width: 700px) {
+  .profile-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
