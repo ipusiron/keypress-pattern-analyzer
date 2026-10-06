@@ -1,4 +1,5 @@
 :root{
+  color-scheme: dark;
   /* Dark mode colors (default) */
   --bg:#0b0d12;
   --panel:#141926;
@@ -27,19 +28,20 @@
 
 /* Light mode colors */
 :root.light-mode {
+  color-scheme: light;
   --bg:#f8f9fa;
   --panel:#ffffff;
   --border:#e1e5eb;
   --text:#1a1d23;
-  --muted:#6c757d;
+  --muted:#56616d;
   --accent:#0066cc;
-  --accent-2:#28a745;
+  --accent-2:#187b35;
   --danger:#dc3545;
   --shadow:0 4px 12px rgba(0,0,0,.08);
   
   /* Light mode visualization colors */
   --primary: #0066cc;
-  --success: #28a745;
+  --success: #187b35;
   --warning: #ffc107;
 }
 
@@ -61,7 +63,7 @@ body:not(.light-mode) {
 }
 
 .site-header{
-  padding:32px 20px 8px;
+  padding:16px 20px 8px;
   text-align:center;
 }
 .site-header h1{
@@ -102,15 +104,15 @@ body:not(.light-mode) {
   display:grid;
   gap:12px;
 }
-.grid.one{ grid-template-columns: 1fr; }
-.grid.two{ grid-template-columns: repeat(2, 1fr); }
-.grid.three{ grid-template-columns: repeat(3, 1fr); }
-@media (max-width: 720px){
-  .grid.two, .grid.three{ grid-template-columns: 1fr; }
+.grid.one, .grid.two, .grid.three{ grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 720px){
+  .grid.two{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid.three{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 label{ display:block; margin: 6px 0 6px; color: var(--muted); font-size: 14px; }
 input[type="text"], select, textarea{
+  font: inherit;
   width:100%;
   border:1px solid var(--border);
   background:var(--panel);
@@ -136,6 +138,8 @@ textarea.editor{
 
 .controls{ display:flex; gap:10px; flex-wrap: wrap; margin: 6px 0; }
 button{
+  font: inherit;
+  min-height: 44px;
   appearance:none;
   border:1px solid var(--border);
   background:var(--panel);

@@ -213,23 +213,6 @@
 
   // Initialize
   function init() {
-    // Suppress browser extension errors that don't affect functionality
-    window.addEventListener('error', function(e) {
-      if (e.filename && e.filename.includes('content.js')) {
-        e.preventDefault();
-        console.info('Browser extension error suppressed (does not affect KeyPress Pattern Analyzer)');
-        return false;
-      }
-    });
-    
-    window.addEventListener('unhandledrejection', function(e) {
-      if (e.reason && e.reason.message && e.reason.message.includes('message port closed')) {
-        e.preventDefault();
-        console.info('Browser extension promise rejection suppressed (does not affect KeyPress Pattern Analyzer)');
-        return false;
-      }
-    });
-    
     loadProfiles();
     loadTheme();
     bindEvents();
@@ -237,204 +220,44 @@
     updateUI();
     els.phrase.value = DEFAULT_PHRASE;
     clearVisualizations(); // Show initial keyboard layout
+    window.addEventListener('resize', () => {
+      if (state.metrics.totalKeys) renderVisualizations();
+      else clearVisualizations();
+    });
   }
 
   function initTooltips() {
-    // Enhance button tooltips with better positioning
-    const buttons = document.querySelectorAll('button[data-tooltip]');
-    buttons.forEach(button => {
-      button.addEventListener('mouseenter', function() {
-        // Additional tooltip logic if needed
+    document.querySelectorAll('button[data-tooltip]').forEach(button => button.removeAttribute('data-tooltip'));
+    document.querySelectorAll('.help-icon, .viz-help').forEach((icon, i) => {
+      const text = icon.querySelector('.tooltip')?.textContent.trim() || icon.getAttribute('title') || '';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'help-button';
+      button.textContent = '?';
+      button.setAttribute('aria-label', '説明');
+      button.dataset.help = String(i);
+      button.addEventListener('click', () => {
+        document.getElementById('helpText').textContent = button.dataset.helpText || text;
+        document.getElementById('helpDialog').showModal();
       });
+      icon.replaceWith(button);
     });
-
-    // Custom tooltips for visualization help icons
-    const vizHelpIcons = document.querySelectorAll('.viz-header .viz-help');
-    vizHelpIcons.forEach(icon => {
-      let activeTooltip = null;
-      
-      const showTooltip = (e) => {
-        // Remove any existing tooltip
-        if (activeTooltip) {
-          activeTooltip.remove();
-          activeTooltip = null;
-        }
-        
-        const tooltipText = icon.getAttribute('title');
-        if (!tooltipText) return;
-        
-        // Remove title attribute to prevent native tooltip
-        icon.setAttribute('data-original-title', tooltipText);
-        icon.removeAttribute('title');
-        
-        // Create tooltip element
-        activeTooltip = document.createElement('div');
-        activeTooltip.className = 'custom-viz-tooltip';
-        activeTooltip.innerHTML = tooltipText;
-        
-        // Apply high z-index and styling
-        Object.assign(activeTooltip.style, {
-          position: 'fixed',
-          background: 'var(--panel)',
-          color: 'var(--text)',
-          border: '1px solid var(--border)',
-          borderRadius: '6px',
-          padding: '8px 12px',
-          fontSize: '12px',
-          lineHeight: '1.4',
-          maxWidth: '300px',
-          wordWrap: 'break-word',
-          whiteSpace: 'normal',
-          zIndex: '2147483647', // Maximum safe z-index value
-          boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-          pointerEvents: 'none',
-          opacity: '0',
-          transform: 'translateY(-5px)',
-          transition: 'opacity 0.2s ease, transform 0.2s ease'
-        });
-        
-        document.body.appendChild(activeTooltip);
-        
-        // Position tooltip - ALWAYS above to avoid card overlapping
-        const iconRect = icon.getBoundingClientRect();
-        const tooltipRect = activeTooltip.getBoundingClientRect();
-        
-        // ALWAYS position above the icon to avoid stacking context issues
-        let left = iconRect.left + (iconRect.width / 2) - (tooltipRect.width / 2);
-        let top = iconRect.top - tooltipRect.height - 12; // Above with more space
-        
-        // Boundary adjustments for horizontal positioning
-        const margin = 10;
-        if (left < margin) left = margin;
-        if (left + tooltipRect.width > window.innerWidth - margin) {
-          left = window.innerWidth - tooltipRect.width - margin;
-        }
-        
-        // If tooltip goes above viewport, position at top of screen
-        if (top < margin) {
-          top = margin;
-        }
-        
-        activeTooltip.style.left = `${left}px`;
-        activeTooltip.style.top = `${top}px`;
-        
-        // Animate in
-        requestAnimationFrame(() => {
-          activeTooltip.style.opacity = '1';
-          activeTooltip.style.transform = 'translateY(0)';
-        });
-      };
-      
-      const hideTooltip = () => {
-        if (activeTooltip) {
-          activeTooltip.style.opacity = '0';
-          activeTooltip.style.transform = 'translateY(-5px)';
-          setTimeout(() => {
-            if (activeTooltip && activeTooltip.parentNode) {
-              activeTooltip.remove();
-            }
-            activeTooltip = null;
-          }, 200);
-        }
-        
-        // Restore title attribute for accessibility
-        const originalTitle = icon.getAttribute('data-original-title');
-        if (originalTitle) {
-          icon.setAttribute('title', originalTitle);
-        }
-      };
-      
-      // Event listeners
-      icon.addEventListener('mouseenter', showTooltip);
-      icon.addEventListener('mouseleave', hideTooltip);
-      icon.addEventListener('focus', showTooltip);
-      icon.addEventListener('blur', hideTooltip);
-      
-      // Mobile support
-      icon.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        showTooltip(e);
-        setTimeout(hideTooltip, 3000);
-      });
-      
-      // Click support
-      icon.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (activeTooltip) {
-          hideTooltip();
-        } else {
-          showTooltip(e);
-        }
-      });
-    });
-
-    // Mobile touch support for other help icons
-    const otherHelpIcons = document.querySelectorAll('.help-icon, .stat-help');
-    otherHelpIcons.forEach(icon => {
-      icon.addEventListener('touchstart', function(e) {
-        e.preventDefault();
-        this.classList.add('active');
-        setTimeout(() => {
-          this.classList.remove('active');
-        }, 3000);
-      });
-    });
+    document.getElementById('helpClose').addEventListener('click', () => document.getElementById('helpDialog').close());
   }
 
-
   function loadTheme() {
-    try {
-      const savedTheme = localStorage.getItem('theme') || 'dark';
-      // Validate theme value to prevent injection
-      if (savedTheme !== 'light' && savedTheme !== 'dark') {
-        console.warn('Invalid theme value, using default');
-        return;
-      }
-      
-      if (savedTheme === 'light') {
-        document.documentElement.classList.add('light-mode');
-        document.body.classList.add('light-mode');
-        document.getElementById('themeIcon').textContent = '🌙';
-      }
-    } catch (error) {
-      console.warn('Failed to load theme from localStorage:', error);
-      // Fallback to dark theme is default (no action needed)
-    }
+    document.body.classList.toggle('light-mode', document.documentElement.classList.contains('light-mode'));
+    document.getElementById('themeIcon').textContent =
+      document.documentElement.classList.contains('light-mode') ? '🌙' : '☀️';
   }
 
   function toggleTheme() {
-    const isLight = document.documentElement.classList.contains('light-mode');
-    const themeIcon = document.getElementById('themeIcon');
-    
-    if (isLight) {
-      document.documentElement.classList.remove('light-mode');
-      document.body.classList.remove('light-mode');
-      themeIcon.textContent = '☀️';
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.add('light-mode');
-      document.body.classList.add('light-mode');
-      themeIcon.textContent = '🌙';
-      localStorage.setItem('theme', 'light');
-    }
-    
-    // Re-render visualizations if they exist
-    if (state.metrics.totalKeys) {
-      renderVisualizations();
-    }
-  }
-
-  function getThemeColors() {
-    const isLight = document.documentElement.classList.contains('light-mode');
-    return {
-      primary: isLight ? '#0066cc' : '#4da3ff',
-      secondary: isLight ? '#28a745' : '#7bd389',
-      text: isLight ? '#1a1d23' : '#e6ecff',
-      muted: isLight ? '#6c757d' : '#9fb0d8',
-      border: isLight ? '#e1e5eb' : '#1f2640',
-      background: isLight ? '#f8f9fa' : '#0f1422',
-      panel: isLight ? '#ffffff' : '#141926'
-    };
+    const light = !document.documentElement.classList.contains('light-mode');
+    document.documentElement.classList.toggle('light-mode', light);
+    loadTheme();
+    try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch { /* Session-only setting. */ }
+    if (state.metrics.totalKeys) renderVisualizations();
+    else clearVisualizations();
   }
 
   function bindEvents() {
@@ -513,7 +336,7 @@
     updateUI();
     renderVisualizations();
     renderDigraphTable();
-    hideAnalysis();
+    performAnalysis();
     notify(typeof message === 'string' ? message : '記録を停止しました。');
   }
 
@@ -533,370 +356,38 @@
   }
 
   function performAnalysis() {
-    if (!state.metrics.totalKeys) return;
-    
-    const analysis = analyzeKeystrokePattern();
-    displayAnalysisResults(analysis);
+    if (!state.metrics.totalKeys) { hideAnalysis(); return; }
+    const m = state.metrics;
+    const values = {
+      wpmValue: Number.isFinite(m.wpm) ? m.wpm.toFixed(1) + ' WPM' : '—',
+      efficiencyValue: m.dwellTimes.length + ' / ' + m.totalKeys,
+      stabilityValue: ms(m.stdDD),
+      avgDwellValue: ms(m.avgDwell),
+      avgFlightValue: ms(m.avgFlight),
+      rhythmValue: ms(m.stdFlight),
+      topDigraphValue: m.ddTimes.length + ' / ' + m.flightTimes.length,
+      styleValue: String(m.incomplete),
+      uniquenessValue: String(m.interruptions)
+    };
+    for (const [id, value] of Object.entries(values)) document.getElementById(id).textContent = value;
+    document.getElementById('analysisText').textContent =
+      'UDは次のキーの押下−前のキーの解放です。負の値は押下の重なりを示します。' +
+      '標準偏差はこの記録内のばらつきで、本人固有性や能力を表しません。' +
+      '「—」は試料なし、0 msとは異なります。欠測キーは保持時間に含めません。' +
+      'WPMは最終入力のUnicodeコードポイント数÷5÷記録時間（分）です。訂正後の文字数であり正確性の点数ではありません。' +
+      '本人確認・なりすまし耐性・押す力・疲労は判定できません。' +
+      '入力方式・機器・ブラウザー・練習の影響を受けます。物理キーの時間精度は保証しません。';
     showAnalysis();
   }
 
-  function generateDetailedSummary(wpm, benchmarks, metrics, stability, uniqueness, digraphAnalysis, styleDetails) {
-    let summary = '';
-    
-    // タイピング速度分析
-    summary += `🎯 **タイピング速度分析**\n`;
-    summary += `あなたの速度: ${wpm}WPM\n`;
-    if (wpm >= benchmarks.wpm.expert) {
-      summary += `→ 上級者レベル（平均${benchmarks.wpm.average}WPMを大きく上回る高速タイピング）\n`;
-    } else if (wpm >= benchmarks.wpm.average) {
-      summary += `→ 平均以上（平均${benchmarks.wpm.average}WPMを上回る良好な速度）\n`;
-    } else if (wpm >= benchmarks.wpm.beginner) {
-      summary += `→ 標準レベル（平均${benchmarks.wpm.average}WPMに向けて向上の余地あり）\n`;
-    } else {
-      summary += `→ 初心者レベル（練習により${benchmarks.wpm.beginner}WPM以上を目指せます）\n`;
-    }
-    summary += '\n';
-    
-    // タイミング特性分析
-    summary += `⏱️ **タイミング特性分析**\n`;
-    summary += `Dwell Time（キー押下時間）: ${metrics.avgDwell.toFixed(0)}ms\n`;
-    if (metrics.avgDwell < benchmarks.dwellTime.fast) {
-      summary += `→ 平均${benchmarks.dwellTime.average}msより短く、軽快なタッチ\n`;
-    } else if (metrics.avgDwell > benchmarks.dwellTime.slow) {
-      summary += `→ 平均${benchmarks.dwellTime.average}msより長く、確実な押下\n`;
-    } else {
-      summary += `→ 平均的な${benchmarks.dwellTime.average}ms前後で標準的\n`;
-    }
-    
-    summary += `Flight Time（キー間移動時間）: ${metrics.avgFlight.toFixed(0)}ms\n`;
-    if (metrics.avgFlight < benchmarks.flightTime.fast) {
-      summary += `→ 平均${benchmarks.flightTime.average}msより短く、素早い指移動\n`;
-    } else if (metrics.avgFlight > benchmarks.flightTime.slow) {
-      summary += `→ 平均${benchmarks.flightTime.average}msより長く、慎重な選択\n`;
-    } else {
-      summary += `→ 平均的な${benchmarks.flightTime.average}ms前後で標準的\n`;
-    }
-    summary += '\n';
-    
-    // 安定性・一貫性分析
-    summary += `📊 **安定性・一貫性分析**\n`;
-    summary += `安定性スコア: ${stability.toFixed(0)}%\n`;
-    if (stability >= benchmarks.stability.veryStable) {
-      summary += `→ 非常に安定（平均${benchmarks.stability.stable}%を大きく上回る一貫性）\n`;
-    } else if (stability >= benchmarks.stability.stable) {
-      summary += `→ 安定（平均${benchmarks.stability.stable}%前後の良好な一貫性）\n`;
-    } else {
-      summary += `→ 不安定（平均${benchmarks.stability.stable}%を下回り、リズム改善の余地あり）\n`;
-    }
-    summary += `特徴: ${styleDetails.join('、')}\n\n`;
-    
-    // Digraphパターン分析
-    if (digraphAnalysis.fast.length > 0 || digraphAnalysis.slow.length > 0) {
-      summary += `🔤 **文字組み合わせパターン分析**\n`;
-      if (digraphAnalysis.fast.length > 0) {
-        summary += `高速処理パターン: ${digraphAnalysis.fast.slice(0, 5).join(', ')}\n`;
-        summary += `→ これらの組み合わせは得意で素早く入力できています\n`;
-      }
-      if (digraphAnalysis.slow.length > 0) {
-        summary += `時間要するパターン: ${digraphAnalysis.slow.slice(0, 5).join(', ')}\n`;
-        summary += `→ これらの組み合わせは練習により改善可能です\n`;
-      }
-      if (digraphAnalysis.consistent.length > 0) {
-        summary += `安定パターン: ${digraphAnalysis.consistent.slice(0, 3).join(', ')}\n`;
-      }
-      summary += '\n';
-    }
-    
-    // 個人特性サマリー
-    summary += `🎭 **個人特性サマリー**\n`;
-    summary += `パターン多様性: ${uniqueness}%\n`;
-    if (uniqueness >= 70) {
-      summary += `→ 多様なキー組み合わせを使用し、豊富な表現力を持つタイピング\n`;
-    } else if (uniqueness >= 50) {
-      summary += `→ 標準的なキーパターンで、バランスの取れたタイピング\n`;
-    } else {
-      summary += `→ 特定のパターンに集中する効率重視のタイピング\n`;
-    }
-    
-    // セキュリティ的総合評価
-    summary += '\n🔒 **セキュリティ的総合評価**\n';
-    
-    // 個人識別性の評価
-    let identifiabilityScore = 0;
-    let spoofingResistance = '';
-    let recommendedSecurity = '';
-    
-    // 安定性による識別性（高すぎても低すぎても問題）
-    if (stability >= 70 && stability <= 85) {
-      identifiabilityScore += 3; // 理想的な安定性
-      summary += `✓ 安定性が理想的範囲（${stability.toFixed(0)}%）- 個人識別に適している\n`;
-    } else if (stability > 85) {
-      identifiabilityScore += 1;
-      summary += `△ 安定性が高すぎ（${stability.toFixed(0)}%）- パターンが単調で模倣されやすい\n`;
-    } else if (stability < 50) {
-      identifiabilityScore += 1;
-      summary += `△ 安定性が低い（${stability.toFixed(0)}%）- 本人認証時に誤判定の可能性\n`;
-    } else {
-      identifiabilityScore += 2;
-      summary += `○ 安定性が適度（${stability.toFixed(0)}%）- 識別可能だが改善の余地あり\n`;
-    }
-    
-    // パターンの多様性による耐性
-    if (uniqueness >= 60) {
-      identifiabilityScore += 3;
-      summary += `✓ パターン多様性が高い（${uniqueness}%）- なりすまし困難\n`;
-    } else if (uniqueness >= 40) {
-      identifiabilityScore += 2;
-      summary += `○ パターン多様性が中程度（${uniqueness}%）- 一定の耐性あり\n`;
-    } else {
-      identifiabilityScore += 1;
-      summary += `△ パターンが単調（${uniqueness}%）- 観察により模倣される可能性\n`;
-    }
-    
-    // タイミングの独自性
-    const dwellUniqueness = Math.abs(metrics.avgDwell - benchmarks.dwellTime.average) / benchmarks.dwellTime.average;
-    const flightUniqueness = Math.abs(metrics.avgFlight - benchmarks.flightTime.average) / benchmarks.flightTime.average;
-    
-    if (dwellUniqueness > 0.3 || flightUniqueness > 0.3) {
-      identifiabilityScore += 2;
-      summary += `✓ 独特なタイミング特性 - 個人特有のパターンが顕著\n`;
-    } else if (dwellUniqueness > 0.15 || flightUniqueness > 0.15) {
-      identifiabilityScore += 1;
-      summary += `○ やや特徴的なタイミング - 識別には十分\n`;
-    } else {
-      summary += `△ 平均的なタイミング - 追加認証要素推奨\n`;
-    }
-    
-    // 総合セキュリティレベル判定
-    summary += '\n**🛡️ 生体認証適合性評価**\n';
-    if (identifiabilityScore >= 7) {
-      spoofingResistance = '高耐性';
-      recommendedSecurity = '単体認証可能';
-      summary += `🔒 高セキュリティレベル（${identifiabilityScore}/8点）\n`;
-      summary += `→ キーストローク認証単体での使用が可能\n`;
-      summary += `→ 攻撃者による模倣は非常に困難\n`;
-      summary += `→ 継続認証システムに最適\n`;
-    } else if (identifiabilityScore >= 5) {
-      spoofingResistance = '中耐性';
-      recommendedSecurity = '多要素認証推奨';
-      summary += `⚡ 中セキュリティレベル（${identifiabilityScore}/8点）\n`;
-      summary += `→ 他の認証要素との組み合わせ推奨\n`;
-      summary += `→ 訓練された攻撃者には注意が必要\n`;
-      summary += `→ パスワードとの併用で効果的\n`;
-    } else {
-      spoofingResistance = '低耐性';
-      recommendedSecurity = '補助的認証のみ';
-      summary += `⚠️ 低セキュリティレベル（${identifiabilityScore}/8点）\n`;
-      summary += `→ 主要認証手段としては不適切\n`;
-      summary += `→ 行動分析や異常検知での補助利用\n`;
-      summary += `→ パターン改善により向上可能\n`;
-    }
-    
-    // 音響解析との連携評価
-    summary += '\n**🎤 音響解析連携評価**\n';
-    if (digraphAnalysis.fast.length > 2 && digraphAnalysis.slow.length > 2) {
-      summary += `✓ 音量パターンとの相関分析に適している\n`;
-      summary += `→ Mic Gain Loggerとの併用で識別精度向上\n`;
-      summary += `→ 複合的サイドチャネル攻撃の検証に有効\n`;
-    } else {
-      summary += `○ 基本的な音響パターン分析が可能\n`;
-      summary += `→ より多様な入力での再分析を推奨\n`;
-    }
-    
-    // 推奨セキュリティ対策
-    summary += '\n**📋 推奨セキュリティ対策**\n';
-    if (identifiabilityScore >= 7) {
-      summary += `• キーストローク認証システムの主要要素として活用\n`;
-      summary += `• リアルタイム継続認証の実装\n`;
-      summary += `• 異常検知システムでの高精度判定\n`;
-    } else if (identifiabilityScore >= 5) {
-      summary += `• 従来認証との多要素組み合わせ\n`;
-      summary += `• 定期的なパターン更新による精度向上\n`;
-      summary += `• 環境要因を考慮した閾値調整\n`;
-    } else {
-      summary += `• より安定したパターン確立のための練習\n`;
-      summary += `• 他の生体認証手段との併用検討\n`;
-      summary += `• 行動ログ分析での補助利用\n`;
-    }
-    
-    return summary;
-  }
-
-  function analyzeKeystrokePattern() {
-    const metrics = state.metrics;
-    const events = state.events;
-    const text = els.editor.value;
-    
-    // 平均的な値（研究データに基づく目安）
-    const benchmarks = {
-      wpm: { beginner: 20, average: 35, expert: 60 },
-      dwellTime: { fast: 80, average: 120, slow: 180 },
-      flightTime: { fast: 120, average: 180, slow: 250 },
-      stability: { unstable: 50, stable: 70, veryStable: 85 }
-    };
-    
-    // Calculate WPM (already in metrics)
-    const wpm = metrics.wpm;
-    
-    // Calculate typing efficiency (actual characters vs expected)
-    const actualChars = text.length;
-    const expectedChars = els.phrase.value.length || actualChars;
-    const efficiency = expectedChars > 0 ? Math.round((actualChars / expectedChars) * 100) : 100;
-    
-    // Calculate stability (coefficient of variation for intervals)
-    const cv = metrics.stdDD > 0 ? (metrics.stdDD / metrics.avgDD) * 100 : 0;
-    const stability = Math.max(0, 100 - cv);
-    
-    // Calculate rhythm consistency (based on flight time variance)
-    const rhythmConsistency = metrics.stdFlight > 0 ? 
-      Math.max(0, 100 - (metrics.stdFlight / metrics.avgFlight) * 100) : 100;
-    
-    // 詳細なDigraph分析
-    let digraphAnalysis = { fast: [], slow: [], consistent: [], variable: [] };
-    let topDigraph = '—';
-    let maxCount = 0;
-    
-    if (state.digraphs.size > 0) {
-      for (const [digraph, data] of state.digraphs) {
-        if (data.DD.length > maxCount) {
-          maxCount = data.DD.length;
-          topDigraph = digraph;
-        }
-        
-        if (data.DD.length >= 2) {
-          const avgTime = data.DD.reduce((a, b) => a + b, 0) / data.DD.length;
-          const std = standardDeviation(data.DD);
-          const cv = (std / avgTime) * 100;
-          
-          if (avgTime < 200) digraphAnalysis.fast.push(digraph);
-          if (avgTime > 400) digraphAnalysis.slow.push(digraph);
-          if (cv < 20) digraphAnalysis.consistent.push(digraph);
-          if (cv > 40) digraphAnalysis.variable.push(digraph);
-        }
-      }
-    }
-    
-    // より詳細なタイピングスタイル分析
-    let typingStyle = '';
-    let styleDetails = [];
-    
-    // Dwell time 分析
-    if (metrics.avgDwell < benchmarks.dwellTime.fast) {
-      typingStyle = '軽快型';
-      styleDetails.push('キーを軽くタッチする傾向');
-    } else if (metrics.avgDwell > benchmarks.dwellTime.slow) {
-      typingStyle = '重厚型';
-      styleDetails.push('キーをしっかり押し込む傾向');
-    } else {
-      typingStyle = 'バランス型';
-      styleDetails.push('標準的なキー押下強度');
-    }
-    
-    // Flight time 分析
-    if (metrics.avgFlight < benchmarks.flightTime.fast) {
-      styleDetails.push('指の移動が素早い');
-    } else if (metrics.avgFlight > benchmarks.flightTime.slow) {
-      styleDetails.push('慎重に次のキーを選択');
-    }
-    
-    // 安定性分析
-    if (cv > 30) {
-      typingStyle += ' (不安定)';
-      styleDetails.push('リズムのばらつきが大きい');
-    } else if (cv < 15) {
-      typingStyle += ' (高安定)';
-      styleDetails.push('非常に一定したリズム');
-    }
-    
-    // Calculate uniqueness score based on pattern variety
-    const uniqueDigraphs = state.digraphs.size;
-    const totalDigraphs = Math.max(1, metrics.totalKeys - 1);
-    const uniqueness = Math.round((uniqueDigraphs / totalDigraphs) * 100);
-    
-    // 平均との比較分析を含むより詳細なサマリー生成
-    let summaryText = generateDetailedSummary(wpm, benchmarks, metrics, stability, uniqueness, digraphAnalysis, styleDetails);
-    
-    return {
-      wpm: wpm,
-      efficiency: efficiency,
-      stability: stability.toFixed(1),
-      avgDwell: metrics.avgDwell.toFixed(1),
-      avgFlight: metrics.avgFlight.toFixed(1),
-      rhythmConsistency: rhythmConsistency.toFixed(1),
-      topDigraph: topDigraph + (maxCount > 1 ? ` (×${maxCount})` : ''),
-      typingStyle: typingStyle,
-      uniqueness: uniqueness,
-      summaryText: summaryText
-    };
-  }
-
-  function formatAnalysisText(text) {
-    // HTML escape function to prevent XSS
-    function escapeHtml(unsafe) {
-      return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    }
-    
-    // First escape the text, then apply safe formatting
-    const escaped = escapeHtml(text);
-    return escaped
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // **bold** -> <strong>
-      .replace(/\n/g, '<br>') // 改行を<br>に変換
-      .replace(/→/g, '&nbsp;&nbsp;→') // 矢印の前にスペースを追加
-      .replace(/(🎯|⏱️|📊|🔤|🎭|🏆|🔒|⚡|⚠️|✓|○|△|🛡️|🎤|📋)/g, '<span style="font-size: 1.1em;">$1</span>'); // 絵文字を少し大きく
-  }
-
-  function displayAnalysisResults(analysis) {
-    // Performance metrics
-    document.getElementById('wpmValue').textContent = analysis.wpm + ' WPM';
-    document.getElementById('efficiencyValue').textContent = analysis.efficiency + '%';
-    document.getElementById('stabilityValue').textContent = analysis.stability + '%';
-    
-    // Timing characteristics
-    document.getElementById('avgDwellValue').textContent = analysis.avgDwell + 'ms';
-    document.getElementById('avgFlightValue').textContent = analysis.avgFlight + 'ms';
-    document.getElementById('rhythmValue').textContent = analysis.rhythmConsistency + '%';
-    
-    // Personal characteristics
-    document.getElementById('topDigraphValue').textContent = analysis.topDigraph;
-    document.getElementById('styleValue').textContent = analysis.typingStyle;
-    document.getElementById('uniquenessValue').textContent = analysis.uniqueness + '%';
-    
-    // Summary text with proper formatting
-    const analysisElement = document.getElementById('analysisText');
-    analysisElement.innerHTML = formatAnalysisText(analysis.summaryText);
-    
-    // Add color coding
-    updateValueColors('wpmValue', analysis.wpm, [20, 40]);
-    updateValueColors('efficiencyValue', analysis.efficiency, [80, 95]);
-    updateValueColors('stabilityValue', parseFloat(analysis.stability), [60, 80]);
-    updateValueColors('rhythmValue', parseFloat(analysis.rhythmConsistency), [60, 80]);
-    updateValueColors('uniquenessValue', analysis.uniqueness, [50, 70]);
-  }
-
-  function updateValueColors(elementId, value, thresholds) {
-    const element = document.getElementById(elementId);
-    element.classList.remove('highlight', 'good', 'warning');
-    
-    if (value >= thresholds[1]) {
-      element.classList.add('good');
-    } else if (value >= thresholds[0]) {
-      element.classList.add('highlight');
-    } else {
-      element.classList.add('warning');
-    }
-  }
-
   function showAnalysis() {
-    document.getElementById('analysisSection').style.display = 'block';
+    document.getElementById('analysisSection').hidden = false;
   }
 
   function hideAnalysis() {
-    document.getElementById('analysisSection').style.display = 'none';
+    document.getElementById('analysisSection').hidden = true;
+    document.querySelectorAll('#analysisSection .metric-value').forEach(el => { el.textContent = '—'; });
+    document.getElementById('analysisText').textContent = '';
   }
 
   function recordEvent(event) {
@@ -947,7 +438,6 @@
   const average = values => Core.mean(values);
 
   function updateUI() {
-    // Enable/disable buttons
     els.btnStart.disabled = state.running || importing;
     els.btnStop.disabled = !state.running;
     els.btnClear.disabled = state.running;
@@ -955,56 +445,18 @@
     els.mode.disabled = state.running;
     els.imeToggle.disabled = state.running;
     els.phrase.disabled = state.running || els.mode.value !== 'custom';
-    
     els.btnSave.disabled = state.running || importing || !state.metrics.totalKeys;
     els.btnExport.disabled = state.profiles.length === 0;
     els.btnImport.disabled = state.running || importing;
     els.btnCompare.disabled = state.running || state.profiles.length < 2;
-    document.getElementById('btnDelete').disabled = state.running || importing || !state.profiles.length;
-    
-    // Update summary stats
-    const statsContainer = document.querySelector('.grid.three');
-    if (state.metrics.totalKeys) {
-      statsContainer.innerHTML = `
-        <div class="stat">
-          <span class="stat-help" title="総キー押下回数（スペースキー含む）">?</span>
-          <div class="stat__label">Keystrokes</div>
-          <div class="stat__value">${state.metrics.totalKeys}</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="タイピング開始から終了までの総時間">?</span>
-          <div class="stat__label">Duration</div>
-          <div class="stat__value">${(state.metrics.duration / 1000).toFixed(2)}s</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="Dwell: キー押下時間の平均 / DD: 連続キー間隔の平均">?</span>
-          <div class="stat__label">Avg Dwell / DD</div>
-          <div class="stat__value">${ms(state.metrics.avgDwell)} / ${ms(state.metrics.avgDD)}</div>
-        </div>
-      `;
-    } else {
-      statsContainer.innerHTML = `
-        <div class="stat">
-          <span class="stat-help" title="総キー押下回数（スペースキー含む）">?</span>
-          <div class="stat__label">Keystrokes</div>
-          <div class="stat__value">—</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="タイピング開始から終了までの総時間">?</span>
-          <div class="stat__label">Duration</div>
-          <div class="stat__value">—</div>
-        </div>
-        <div class="stat">
-          <span class="stat-help" title="Dwell: キー押下時間の平均 / DD: 連続キー間隔の平均">?</span>
-          <div class="stat__label">Avg Dwell / DD</div>
-          <div class="stat__value">—</div>
-        </div>
-      `;
-    }
-    
-    // Update button texts
-    els.btnStart.textContent = state.running ? 'Recording...' : 'Start';
-    els.editor.placeholder = state.running ? 'Type here... (半角英数字推奨 / Half-width characters recommended)' : 'Click Start to begin recording';
+    document.getElementById('btnDelete').disabled = state.running || importing;
+    const values = document.querySelectorAll('.grid.three .stat__value');
+    const m = state.metrics;
+    values[0].textContent = m.totalKeys || '—';
+    values[1].textContent = m.totalKeys ? (m.duration / 1000).toFixed(2) + ' s' : '—';
+    values[2].textContent = m.totalKeys ? ms(m.avgDwell) + ' / ' + ms(m.avgDD) : '—';
+    document.getElementById('profileCount').textContent = state.profiles.length + ' / 50';
+    els.editor.placeholder = state.running ? 'Type here…' : 'Click Start to begin recording';
   }
 
   function renderVisualizations() {
@@ -1026,9 +478,7 @@
       const colors = getThemeColors();
       const vizConfig = getVizConfig();
       
-      console.log('Debug Timeline: events length:', events.length);
       if (events.length === 0) {
-        console.log('Debug Timeline: No events to render');
         return;
       }
     
@@ -1041,18 +491,16 @@
     
     ctx.clearRect(0, 0, width, height);
     
-    const maxTime = events[events.length - 1].t;
+    const maxTime = Math.max(1, events[events.length - 1].t);
     const scale = (width - 2 * padding) / maxTime;
     
     // Track text positions to avoid overlaps
     const textPositions = [];
     
     // Draw key press bars with improved colors and visibility
-    state.events.forEach(event => {
+    (state.metrics.strokes || []).forEach(event => {
       if (event.type === 'down') {
-        const upEvent = state.events.find(e => 
-          e.type === 'up' && e.code === event.code && e.t > event.t
-        );
+        const upEvent = event.up === null ? null : { t: event.up };
         
         if (upEvent) {
           const x = padding + event.t * scale;
@@ -1076,7 +524,7 @@
           // Enhanced multi-layer text positioning with adaptive sizing
           if (w >= 6) { // Show label for even smaller bars
             const text = event.key.toUpperCase();
-            const dwellTime = event.dwellTime || 0;
+            const dwellTime = upEvent.t - event.t;
             
             // Calculate adaptive font size based on density and importance
             const density = Math.min(events.length / 50, 1); // 0-1 density factor
@@ -1252,9 +700,7 @@
       const vizConfig = getVizConfig();
       const isLight = document.documentElement.classList.contains('light-mode');
       
-      console.log('Debug Rhythm: down events length:', events.length);
       if (events.length < 2) {
-        console.log('Debug Rhythm: Not enough events to render');
         return;
       }
     
@@ -1266,16 +712,14 @@
     ctx.clearRect(0, 0, width, height);
     
     // Calculate intervals
-    const intervals = [];
-    for (let i = 0; i < events.length - 1; i++) {
-      intervals.push(events[i + 1].t - events[i].t);
-    }
+    const intervals = state.metrics.ddTimes || [];
+    if (!intervals.length) return;
     
     const maxInterval = Math.max(...intervals);
     const minInterval = Math.min(...intervals);
     const avgInterval = average(intervals);
     const xScale = (width - 2 * padding) / intervals.length;
-    const yScale = (height - 2 * padding - 20) / maxInterval;
+    const yScale = (height - 2 * padding - 20) / Math.max(1, maxInterval);
     
     // Draw background grid for better readability
     ctx.strokeStyle = colors.border || '#1f2640';
@@ -1361,7 +805,7 @@
     ctx.fillText(`Avg: ${avgInterval.toFixed(0)}ms`, width - padding - 5, avgY - 5);
     
     // Add Y-axis labels
-    ctx.fillStyle = colors.muted;
+    ctx.fillStyle = colors.textMuted;
     ctx.font = '9px monospace';
     ctx.textAlign = 'right';
     ctx.fillText(`${maxInterval.toFixed(0)}ms`, padding - 5, padding + 5);
@@ -1392,7 +836,8 @@
         keyFreq.set(event.key, count + 1);
       });
       
-      console.log('Debug Heatmap: key frequencies:', keyFreq.size);
+      document.getElementById('keyCounts').textContent = [...keyFreq].map(([key, count]) =>
+        JSON.stringify(key) + ': ' + count).join(' / ');
       
       // Always render keyboard layout, even with no data
       const hasData = keyFreq.size > 0;
@@ -1556,7 +1001,7 @@
     // Draw extra keys that are not in the standard layout
     if (extraKeys.length > 0) {
       const extraY = startY + rows.length * (keySize + keyGap) + 5;
-      extraKeys.forEach((key, index) => {
+      extraKeys.slice(0, 14).forEach((key, index) => {
         const extraX = startX + index * (keySize + keyGap);
         const freq = keyFreq.get(key) || 0;
         const intensity = freq / maxFreq;
@@ -1602,33 +1047,12 @@
   }
 
   function createCanvas(container) {
-    // Check if canvas already exists to avoid recreating
-    const existingCanvas = container.querySelector('canvas');
-    if (existingCanvas) {
-      return existingCanvas; // Return existing canvas
-    }
-    
-    // Clear container (no need to preserve titles/icons - they're now outside)
-    container.innerHTML = '';
-    
-    // No need to recreate help icons or titles - they're now in the viz-header outside the viz-box
-    
-    const canvas = document.createElement('canvas');
-    // Ensure minimum width for proper visualization, allow horizontal scroll if needed
-    const minWidth = container.id === 'heatmap' ? 400 : 300;
-    canvas.width = Math.max(minWidth, container.offsetWidth - 28); // Account for padding
-    canvas.style.marginTop = '10px';
-    canvas.style.maxWidth = 'none'; // Allow canvas to exceed container width
-    
-    // Different heights for different visualization types
-    if (container.id === 'heatmap') {
-      canvas.height = 280; // Much taller for keyboard layout + legend + extra keys
-    } else if (container.id === 'timeline') {
-      canvas.height = 120; // Shorter for timeline
-    } else {
-      canvas.height = 160; // Default for rhythm
-    }
-    
+    const canvas = container.querySelector('canvas') || document.createElement('canvas');
+    const minWidth = container.id === 'heatmap' ? 640 : 400;
+    canvas.width = Math.max(minWidth, container.clientWidth - 28);
+    canvas.height = container.id === 'heatmap' ? 380 : 200;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', container.id);
     container.appendChild(canvas);
     return canvas;
   }

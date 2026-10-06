@@ -7,9 +7,10 @@
   <meta name="description" content="Interactive web app to explore keystroke dynamics and typing patterns, aimed at security education and research.">
   
   <!-- Security Headers (GitHub Pages compatible) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; media-src 'none'; frame-src 'none';">
-  <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self';
+    img-src 'self' data:; connect-src 'none'; object-src 'none'; media-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <script src="./theme-init.js"></script>
   
   <link rel="stylesheet" href="./style.css">
 </head>
@@ -38,10 +39,10 @@
         </span>
       </div>
 
-      <div class="note-box" style="background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin-bottom: 15px;">
+      <div class="note-box">
         <strong>📝 入力モードについて</strong><br>
-        <span style="color: var(--muted); font-size: 14px;">
-          半角・全角どちらも対応していますが、キーストローク分析の精度向上のため<strong style="color: var(--accent);">半角英数字モードを推奨</strong>します。
+        <span>
+          半角・全角どちらも対応していますが、キーストローク分析のため<strong>半角英数字モードを推奨</strong>します。
           日本語入力時はIME変換の影響で正確な計測が困難になります。
         </span>
       </div>
@@ -173,6 +174,7 @@
           </div>
           <div class="viz-box" id="heatmap">
           </div>
+          <p id="keyCounts" class="small"></p>
         </div>
       </div>
     </section>
@@ -205,7 +207,7 @@
     </section>
 
     <!-- ====== キーストローク分析結果 ====== -->
-    <section class="card" id="analysisSection" style="display: none;">
+    <section class="card" id="analysisSection" hidden>
       <div class="section-header">
         <h2>Analysis Results</h2>
         <span class="help-icon">
@@ -218,18 +220,18 @@
       
       <div class="analysis-grid">
         <div class="analysis-card">
-          <h3>パフォーマンス</h3>
+          <h3>記録の概要</h3>
           <div class="analysis-metrics">
             <div class="metric">
               <span class="metric-label">WPM (Words per Minute)</span>
               <span class="metric-value" id="wpmValue">—</span>
             </div>
             <div class="metric">
-              <span class="metric-label">タイピング効率</span>
+              <span class="metric-label">解放確認数 / 押下数</span>
               <span class="metric-value" id="efficiencyValue">—</span>
             </div>
             <div class="metric">
-              <span class="metric-label">安定性スコア</span>
+              <span class="metric-label">DDの標準偏差</span>
               <span class="metric-value" id="stabilityValue">—</span>
             </div>
           </div>
@@ -247,25 +249,25 @@
               <span class="metric-value" id="avgFlightValue">—</span>
             </div>
             <div class="metric">
-              <span class="metric-label">リズム一貫性</span>
+              <span class="metric-label">UDの標準偏差</span>
               <span class="metric-value" id="rhythmValue">—</span>
             </div>
           </div>
         </div>
         
         <div class="analysis-card">
-          <h3>個人特徴</h3>
+          <h3>試料数と欠測</h3>
           <div class="analysis-metrics">
             <div class="metric">
-              <span class="metric-label">最頻出Digraph</span>
+              <span class="metric-label">DD / UDの試料数</span>
               <span class="metric-value" id="topDigraphValue">—</span>
             </div>
             <div class="metric">
-              <span class="metric-label">タイピングスタイル</span>
+              <span class="metric-label">解放未確認の押下数</span>
               <span class="metric-value" id="styleValue">—</span>
             </div>
             <div class="metric">
-              <span class="metric-label">特徴度</span>
+              <span class="metric-label">記録区間の中断数</span>
               <span class="metric-value" id="uniquenessValue">—</span>
             </div>
           </div>
@@ -273,7 +275,7 @@
       </div>
       
       <div class="analysis-summary">
-        <h3>総合評価</h3>
+        <h3>読み方と限界</h3>
         <p id="analysisText">記録データを分析して、あなたのタイピングパターンの特徴を表示します。</p>
       </div>
     </section>
@@ -296,6 +298,7 @@
         <button id="btnDelete" disabled>保存プロファイルを全削除</button>
       </div>
       <p id="comparison"></p>
+      <p id="profileCount"></p>
       <p class="muted small">記録後にプロファイルを保存して、タイピングパターンを比較できます。</p>
     </section>
   </main>
@@ -307,7 +310,13 @@
         ipusiron/keypress-pattern-analyzer
       </a>
       ）
+    </div>
   </footer>
+  <dialog id="helpDialog" aria-labelledby="helpTitle">
+    <h2 id="helpTitle">説明</h2>
+    <p id="helpText"></p>
+    <button id="helpClose">閉じる</button>
+  </dialog>
 
   <script src="./logic.js" defer></script>
   <script src="./script.js" defer></script>
