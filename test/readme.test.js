@@ -79,3 +79,23 @@ test('directory tree describes every tracked/source file', () => {
     for (const line of tree.trim().split('\n')) assert.match(line, /# \S/);
   }
 });
+
+test('use-case examples unique to this tool match the core computation (ja and en)', () => {
+  const [ja, en] = files.map((f) => fs.readFileSync(f, 'utf8'));
+  const overlap = L.sample('overlap');
+  assert.deepEqual(overlap.metrics.flightTimes, [-40]);
+  assert.equal(overlap.metrics.avgFlight, -40);
+  assert.ok(ja.includes('160−200＝−40ミリ秒') && en.includes('160 − 200 = −40 ms'));
+  const incomplete = L.sample('incomplete');
+  assert.deepEqual([incomplete.metrics.avgFlight, incomplete.metrics.avgDwell, incomplete.metrics.incomplete], [null, 40, 1]);
+  assert.ok(ja.includes('計算できず（null）') && ja.includes('40ミリ秒になり、欠測は1'));
+  assert.ok(en.includes('cannot be computed (null)') && en.includes('dwell time is 40 ms') && en.includes('incomplete count is 1'));
+  const normal = L.sample('normal');
+  const doubled = L.sample('doubled');
+  assert.deepEqual([normal.metrics.avgDwell, normal.metrics.avgDD, normal.metrics.avgFlight], [80, 120, 40]);
+  assert.deepEqual([doubled.metrics.avgDwell, doubled.metrics.avgDD, doubled.metrics.avgFlight], [160, 240, 80]);
+  assert.equal(C.cosine(normal.metrics, doubled.metrics), 1);
+  assert.equal(C.cosine(normal.metrics, L.sample('overlap').metrics).toFixed(3), '0.737');
+  assert.ok(ja.includes('80・120・40ミリ秒') && ja.includes('160・240・80ミリ秒') && ja.includes('約0.737'));
+  assert.ok(en.includes('80, 120 and 40 ms') && en.includes('160, 240 and 80 ms') && en.includes('about 0.737'));
+});

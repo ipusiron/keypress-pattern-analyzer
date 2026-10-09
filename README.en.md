@@ -151,6 +151,14 @@ When multiple tabs use the same site, the last save wins. Concurrent editing is 
 
 ## 🎯 Use cases
 
+Ways of using this tool in particular
+
+- Confirming that a negative flight time means keys overlapped (typing and romaji-input classes): when you press the next key before releasing the previous one, the time from releasing the previous key to pressing the next (UD, flight time) goes negative. In the "overlap" sample, B is pressed at 160 ms and A is released at 200 ms, so the flight time is 160 − 200 = −40 ms. A negative value represents the time two keys were held together (keyboard rollover). You can confirm the key overlap that happens in fast typing by subtracting the timestamps
+- Seeing that a statistic cannot be produced when data is missing (measurement and data-quality classes): the "incomplete" sample only presses A, presses B and releases B, with no event releasing A. Then the average flight time cannot be computed (null), the dwell time is 40 ms from the released keys only, and the incomplete count is 1. In the comparison table the difference for a metric with missing data is shown as "—". It shows with a concrete example that a statistic cannot be produced when even one value never arrives
+- Confirming that cosine similarity looks at shape, not magnitude (vector and machine-learning classes): the "doubled" sample is the dwell, DD and flight times of "normal" (80, 120 and 40 ms) all doubled (160, 240 and 80 ms). Comparing it with normal by cosine similarity over the vector of the three values gives 1, because even with every number doubled the direction is the same. Typing uniformly slower does not change the shape. The differently shaped "overlap" sample gives about 0.737, which shows that cosine similarity looks only at the ratios
+
+一般的な使い方
+
 - Classes and self-study: vary press/release order to observe negative UD and missing data.
 - Statistics practice: type the same short phrase repeatedly and compare means with variation.
 - Choosing work equipment: keep observations when comparing how keyboards feel with the same text, without rating productivity or health.
